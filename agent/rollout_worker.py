@@ -6,7 +6,7 @@ import random
 import torch.backends.cudnn
 from wrappers import atari_wrappers
 
-from rollout_storage.rollout_worker_buffer import RolloutWorkerBuffer
+from rollout_storage.worker.torch_worker_buffer import TorchWorkerBuffer
 from queue import Queue
 from model.network import ModelNetwork
 
@@ -54,8 +54,8 @@ class RolloutWorker(object):
 
             self.workers_envs.append(env)
             self.workers_buffers.append(
-                RolloutWorkerBuffer(self.options_flags.r_f_steps, self.env_state_dim, self.action_count,
-                                    (self.feature_vec_dim,)))
+                TorchWorkerBuffer(self.options_flags.r_f_steps, self.env_state_dim, self.action_count,
+                                  (self.feature_vec_dim,)))
             init_state = torch.from_numpy(self.workers_envs[i].reset()).float()
             self.observations.append(init_state)
         self.observations = torch.stack(self.observations)
@@ -113,10 +113,10 @@ class RolloutWorker(object):
             avg_rew = np.average(list(self.episode_rewards.queue))
             if avg_rew > self.max_avg_reward:
                 self.max_avg_reward = avg_rew
-                print("Worker: " + str(self.actor_id) + " New MAX avg(100) reward: ", self.max_avg_reward)
+                print("worker: " + str(self.actor_id) + " New MAX avg(100) reward: ", self.max_avg_reward)
     
             if self.iteration_counter % 25 == 0:
-                print('Worker ' + str(self.actor_id) + '  WorkerIteration: ', self.iteration_counter, "  Avg. reward 100/ep: ",
+                print('worker ' + str(self.actor_id) + '  WorkerIteration: ', self.iteration_counter, "  Avg. reward 100/ep: ",
                           avg_rew)
 
         return self.workers_buffers, self.actor_id, iteration_rewards, iteration_ep_steps
