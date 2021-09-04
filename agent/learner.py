@@ -14,7 +14,7 @@ from rollout_storage.experiece_replay_vtrace import ExperienceReplay
 from stats.nvidia_power_draw import PowerDrawAgent
 from utils import compress
 from stats.safe_file_writer import SafeFileWriter
-from rollout_storage.replay_buffer_writer import ReplayWriter
+from rollout_storage.writer_queue.replay_buffer_writer import ReplayWriterQueue
 from torch.optim import Adam
 from model.network import ModelNetwork
 from queue import Queue
@@ -47,7 +47,7 @@ class Learner(object):
         self.optimizer = Adam(self.model.parameters(), lr=self.options_flags.lr)
 
         # self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=2000, T_mult=1)
-        self.lr_scheduler = PolynomialLRDecay(self.optimizer, 6000, 0.000001, 2)
+        self.lr_scheduler = PolynomialLRDecay(self.optimizer, 300000, 0.000001, 2)
 
         self.replay_buffer = ExperienceReplay(self.actions_count, (self.model.get_flatten_layer_output_size(),), self.options_flags, self.observation_shape)
 
@@ -86,7 +86,7 @@ class Learner(object):
 
         loaded_model_warmed_up_event = threading.Event()
 
-        replay_writer = ReplayWriter(self.replay_buffer, batch_lock)
+        replay_writer = ReplayWriterQueue(self.replay_buffer, batch_lock)
         replay_writer.start()
 
         stop_event = threading.Event()
@@ -162,7 +162,7 @@ class Learner(object):
                             if iteration_counter % 50 == 0:
                                 print('Episode ', episode, '  Iteration: ', iteration_counter, "  Avg. reward 100/ep: ", rew_avg, " Training iterations: ", training_iteration, ' Lr: ', self.lr_scheduler.get_last_lr())
 
-                            if rew_avg >= 20.2 or training_iteration >= 1000000:
+                            if rew_avg >= 700 or training_iteration >= 1000000:
                                 torch.save(
                                     {
                                         "model_state_dict": self.model.state_dict(),

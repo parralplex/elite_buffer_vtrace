@@ -13,14 +13,14 @@ parser.add_argument('--baseline-loss-coef', type=float, default=0.5)
 parser.add_argument('--entropy-coef', type=float, default=0.0005)
 
 
-parser.add_argument('--r_f_steps', type=int, default=50, help='number of environment steps per 1 rollout fragment of a worker')
+parser.add_argument('--r_f_steps', type=int, default=50, help='number of environment steps per 1 rollout fragment of a worker_buf')
 
 
 parser.add_argument('--gamma', type=float, default=0.99)
 parser.add_argument('--c-const', type=float, default=1)
 parser.add_argument('--rho-const', type=float, default=1)
 
-parser.add_argument('--env', type=str, default='PongNoFrameskip-v4')
+parser.add_argument('--env', type=str, default='BreakoutNoFrameskip-v4')
 
 randomize_seed = int.from_bytes(os.urandom(4), byteorder="little")
 parser.add_argument('--seed', type=int, default=0)

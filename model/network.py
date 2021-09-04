@@ -30,9 +30,9 @@ class ModelNetwork(nn.Module):
 
     def forward(self, inputs, t_b_on_feature_vec=False, no_feature_vec=False):
         time_dim = False
-        T, B = 1, 1
+        t_dim, batch_dim = 1, 1
         if inputs.ndim == 5:
-            T, B, *_ = inputs.shape
+            t_dim, batch_dim, *_ = inputs.shape
             x = flatten(inputs, 0, 1)
             time_dim = True
         else:
@@ -43,22 +43,22 @@ class ModelNetwork(nn.Module):
 
         x = x.view(-1, num_flat_features(x))
 
-        x_logit = F.relu(self.fc1(x))
+        x_logits = F.relu(self.fc1(x))
 
         if not no_feature_vec:
-            feature_vec = x_logit
+            feature_vec = x_logits
             if t_b_on_feature_vec:
-                feature_vec = feature_vec.view(T, B, feature_vec.shape[1])
+                feature_vec = feature_vec.view(t_dim, batch_dim, feature_vec.shape[1])
 
-        logit = self.fc2(x_logit)
-        value = self.fc4(x_logit)
+        logits = self.fc2(x_logits)
+        value = self.fc4(x_logits)
         if time_dim:
-            logit = logit.view(T, B, self.actions_count)
-            value = value.view(T, B)
+            logits = logits.view(t_dim, batch_dim, self.actions_count)
+            value = value.view(t_dim, batch_dim)
         if no_feature_vec:
-            return logit, value
+            return logits, value
         else:
-            return logit, value, feature_vec
+            return logits, value, feature_vec
 
     def get_flatten_layer_output_size(self):
         return self.fc1.out_features
