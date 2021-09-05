@@ -1,16 +1,15 @@
 from queue import Queue, Empty
-from threading import Thread, Lock
+from threading import Thread
 
 from rollout_storage.intefaces.replay_fill_queue_strategy import ReplayFillQueueStrategy
 from utils import compress
 
 
 class ReplayWriterQueue:
-    def __init__(self, replay_buffer, batch_lock: Lock, queue_size: int, fill_in_strategy: ReplayFillQueueStrategy):
-        self.replay_buffer = replay_buffer
+    def __init__(self, replay_buffers, queue_size: int, fill_in_strategy: ReplayFillQueueStrategy):
+        self.replay_buffers = replay_buffers
         self.queue = Queue(maxsize=queue_size)
         self.finished = False
-        self.batch_lock = batch_lock
         self.fill_in_strategy = fill_in_strategy
 
     def start(self):
@@ -26,13 +25,16 @@ class ReplayWriterQueue:
             except Empty:
                 continue
             for i in range(len(worker_data)):
-                self.replay_buffer.store(compress(worker_data[i].states),
-                                         worker_data[i].actions,
-                                         worker_data[i].rewards,
-                                         worker_data[i].logits,
-                                         worker_data[i].not_done,
-                                         worker_data[i].feature_vec,
-                                         self.batch_lock)
+                for j in range(len(self.replay_buffers)):
+                    self.replay_buffers[j].store_next(state=compress(worker_data[i].states),
+                                                      action=worker_data[i].actions,
+                                                      reward=worker_data[i].rewards,
+                                                      logits=worker_data[i].logits,
+                                                      not_done=worker_data[i].not_done,
+                                                      feature_vec=worker_data[i].feature_vec,
+                                                      random_search=True,
+                                                      add_rew_feature=True,
+                                                      p=2)
             self.queue.task_done()
 
     def close(self):

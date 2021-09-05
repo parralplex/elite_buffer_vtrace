@@ -20,7 +20,7 @@ parser.add_argument('--gamma', type=float, default=0.99)
 parser.add_argument('--c-const', type=float, default=1)
 parser.add_argument('--rho-const', type=float, default=1)
 
-parser.add_argument('--env', type=str, default='BreakoutNoFrameskip-v4')
+parser.add_argument('--env', type=str, default='PongNoFrameskip-v4')
 
 randomize_seed = int.from_bytes(os.urandom(4), byteorder="little")
 parser.add_argument('--seed', type=int, default=0)
@@ -38,10 +38,10 @@ parser.add_argument('--actor-update-freq', type=int, default=1, help='number of 
 parser.add_argument('--learner-thread-count', type=int, default=1, help='number of parallel learner threads')
 
 # replay buffer
-parser.add_argument('--buffer-size', type=int, default=1000, help='size of replay buffer')
-parser.add_argument('--elite-set-size', type=int, default=0, help='size of elite set of replay buffer')
-parser.add_argument('--replay-data-ratio', type=float, default=1, help='% number of samples used from normal part of replay buffer when creating batch')
-parser.add_argument('--elite-set-data-ratio', type=float, default=0, help='% number of samples used from elite set when creating batch')
+parser.add_argument('--buffer-size', type=int, default=900, help='size of replay buffer')
+parser.add_argument('--elite-set-size', type=int, default=100, help='size of elite set of replay buffer')
+parser.add_argument('--replay-data-ratio', type=float, default=0.9, help='% number of samples used from normal part of replay buffer when creating batch')
+parser.add_argument('--elite-set-data-ratio', type=float, default=0.1, help='% number of samples used from elite set when creating batch')
 
 # console ouput
 parser.add_argument('--avg-buff-size', type=int, default=100, help='number of data used to calculate average score')

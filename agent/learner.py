@@ -9,8 +9,13 @@ import numpy as np
 import torch.backends.cudnn
 import sys
 
+from rollout_storage.elite_set.buf_population_strategy.brute_force_strategy import BruteForceStrategy
+from rollout_storage.elite_set.buf_population_strategy.lim_zero_strategy import LimZeroStrategy
+from rollout_storage.elite_set.elite_set_replay import EliteSetReplay
+from rollout_storage.experience_replay import ExperienceReplayTorch
+from rollout_storage.writer_queue.keep_latest_strategy import KeepLatestStrategy
 from stats.data_plotter import create_charts
-from rollout_storage.experiece_replay_vtrace import ExperienceReplay
+
 from stats.nvidia_power_draw import PowerDrawAgent
 from utils import compress
 from stats.safe_file_writer import SafeFileWriter
@@ -44,12 +49,18 @@ class Learner(object):
             print("CUDA IS NOT AVAILABLE")
         self.model = ModelNetwork(self.actions_count).to(self.device)
 
+        # self.model.load_state_dict(torch.load('results/BreakoutNoFrameskip-v4_1630692566/regular_model_save_.pt')["model_state_dict"])
+
         self.optimizer = Adam(self.model.parameters(), lr=self.options_flags.lr)
 
         # self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=2000, T_mult=1)
-        self.lr_scheduler = PolynomialLRDecay(self.optimizer, 300000, 0.000001, 2)
+        self.lr_scheduler = PolynomialLRDecay(self.optimizer, 6000, 0.000001, 2)
 
-        self.replay_buffer = ExperienceReplay(self.actions_count, (self.model.get_flatten_layer_output_size(),), self.options_flags, self.observation_shape)
+
+        # size, sample_ratio, options_flags, action_count, env_state_dim, state_compression, feature_vec_dim, insert_strategy : EliteSetInsertStrategy
+        self.replay_buffers = [ExperienceReplayTorch(self.options_flags.buffer_size, self.options_flags.replay_data_ratio, self.options_flags, self.actions_count, self.observation_shape),
+                               EliteSetReplay(self.options_flags.elite_set_size, self.options_flags.elite_set_data_ratio, self.options_flags, self.actions_count, self.observation_shape,
+                                              True, (self.model.get_flatten_layer_output_size(),), BruteForceStrategy(self.options_flags.elite_set_size))]
 
         self.actors = actors
         self.dict = ray.put({k: v.cpu() for k, v in self.model.state_dict().items()})
@@ -80,13 +91,10 @@ class Learner(object):
         learning_lock = threading.Lock()
         batch_lock = threading.Lock()
         actor_lock = threading.Lock()
-        replay_filled_event = threading.Event()
-        replay_prior_filled_event = threading.Event()
-        self.replay_buffer.set_filled_events(replay_filled_event, replay_prior_filled_event)
 
         loaded_model_warmed_up_event = threading.Event()
 
-        replay_writer = ReplayWriterQueue(self.replay_buffer, batch_lock)
+        replay_writer = ReplayWriterQueue(self.replay_buffers, queue_size=10, fill_in_strategy=KeepLatestStrategy())
         replay_writer.start()
 
         stop_event = threading.Event()
@@ -162,7 +170,7 @@ class Learner(object):
                             if iteration_counter % 50 == 0:
                                 print('Episode ', episode, '  Iteration: ', iteration_counter, "  Avg. reward 100/ep: ", rew_avg, " Training iterations: ", training_iteration, ' Lr: ', self.lr_scheduler.get_last_lr())
 
-                            if rew_avg >= 700 or training_iteration >= 1000000:
+                            if rew_avg >= 20.2 or training_iteration >= 1000000:
                                 torch.save(
                                     {
                                         "model_state_dict": self.model.state_dict(),
@@ -172,19 +180,23 @@ class Learner(object):
                                     },
                                     "results/" + self.options_flags.env + "_" + str(run_id) + '/best_model_save_.pt')
                                 stop_event.set()
-                                replay_filled_event.set()
-                                replay_prior_filled_event.set()
+                                for p in range(len(self.replay_buffers)):
+                                    self.replay_buffers[p].replay_filled_event.set()
                                 loaded_model_warmed_up_event.set()
                                 break
 
                             if self.options_flags.reproducible:
                                 for i in range(len(worker_buffers)):
-                                    self.replay_buffer.store(compress(worker_buffers[i].states.detach()),
-                                                                          worker_buffers[i].actions.detach(),
-                                                                          worker_buffers[i].rewards.detach(),
-                                                                          worker_buffers[i].logits.detach(),
-                                                                          worker_buffers[i].not_done.detach(),
-                                                                          worker_buffers[i].feature_vec.detach(), batch_lock)
+                                    for p in range(len(self.replay_buffers)):
+                                        self.replay_buffers[p].store_next(state=compress(worker_buffers[i].states),
+                                                                          action=worker_buffers[i].actions,
+                                                                          reward=worker_buffers[i].rewards,
+                                                                          logits=worker_buffers[i].logits,
+                                                                          not_done=worker_buffers[i].not_done,
+                                                                          feature_vec=worker_buffers[i].feature_vec,
+                                                                          random_search=True,
+                                                                          add_rew_feature=True,
+                                                                          p=2)
                             else:
                                 replay_writer.write(worker_buffers)
 
@@ -195,9 +207,10 @@ class Learner(object):
                         if self.options_flags.reproducible:
                             actor_lock.release()
 
-                            if self.replay_buffer.filled:
+                            # TODO this condition is no complete - need to check the whole array self.replay_buffers
+                            if self.replay_buffers[0].filled:
 
-                                self.learning(learning_lock, batch_lock, self.model, self.optimizer, loss_file, self.lr_scheduler, lr_file)
+                                self.learning(learning_lock, self.model, self.optimizer, loss_file, self.lr_scheduler, lr_file)
 
                                 self.dict = ray.put({k: v.cpu() for k, v in self.model.state_dict().items()})
 
@@ -247,9 +260,10 @@ class Learner(object):
 
         def learning_trd(model, optimizer, lr_scheduler):
             nonlocal loss_file, training_iteration, lr_file
-            replay_filled_event.wait()
+            for p in range(len(self.replay_buffers)):
+                self.replay_buffers[p].replay_filled_event.wait()
             # loaded_model_warmed_up_event.wait()
-            # replay_prior_filled_event.wait()
+
             while training_iteration < self.options_flags.training_max_steps:
                 training_iteration += 1
                 if stop_event.is_set():
@@ -289,9 +303,17 @@ class Learner(object):
 
     def learning(self, learning_lock, model_net, optimizer_net, loss_file, lr_scheduler, lr_file):
        
-        states, actions, rewards, beh_logits, not_done = self.replay_buffer.sample(self.options_flags.batch_size)
+        states, actions, rewards, beh_logits, not_done = self.replay_buffers[0].random_sample(self.options_flags.batch_size)
+        for i in range(1, len(self.replay_buffers)):
+            states_n, actions_n, rewards_n, beh_logits_n, not_done_n = self.replay_buffers[i].random_sample(
+                self.options_flags.batch_size)
+            states = torch.cat((states, states_n), 0)
+            actions = torch.cat((actions, actions_n), 0)
+            rewards = torch.cat((rewards, rewards_n), 0)
+            beh_logits = torch.cat((beh_logits, beh_logits_n), 0)
+            not_done = torch.cat((not_done, not_done_n), 0)
 
-        states, actions, rewards, beh_logits, not_done = states.to(self.device), actions.to(self.device), rewards.to(self.device), beh_logits.to(self.device), not_done.to(self.device)
+        states, actions, rewards, beh_logits, not_done = states.to(self.device).transpose(1, 0), actions.to(self.device).transpose(1, 0), rewards.to(self.device).transpose(1, 0), beh_logits.to(self.device).transpose(1, 0), not_done.to(self.device).transpose(1, 0)
 
         with learning_lock:
 

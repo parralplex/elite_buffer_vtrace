@@ -104,7 +104,7 @@ class RolloutWorker(object):
                     self.workers_buffers[i].insert(new_state, torch.from_numpy(np.array([[actions[i].item()]])),
                                                    torch.from_numpy(np.array([[reward]])).float(),
                                                    logits[i],
-                                                   terminal,
+                                                   not terminal,
                                                    feature_vecs[i])
                     self.observations.append(new_state)
                 self.observations = torch.stack(self.observations)
