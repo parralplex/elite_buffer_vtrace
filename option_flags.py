@@ -26,6 +26,8 @@ randomize_seed = int.from_bytes(os.urandom(4), byteorder="little")
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--reproducible', type=bool, default=False)
 
+parser.add_argument('--use_elite_set', type=bool, default=False)
+
 parser.add_argument('--actor_count', type=int, default=8, help='number of actors working in parallel')
 parser.add_argument('--envs-per-actor', type=int, default=20, help='number of environments per 1 actor')
 

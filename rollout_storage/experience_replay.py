@@ -6,7 +6,7 @@ from threading import Event
 
 
 class ExperienceReplayTorch(object):
-    def __init__(self, size, sample_ratio, options_flags, action_count, env_state_dim, state_compression=True):
+    def __init__(self, size, sample_ratio, options_flags, action_count, env_state_dim, batch_lock, state_compression=True):
         self.options_flags = options_flags
         self.size = size
         self.sample_ratio = sample_ratio
@@ -16,6 +16,7 @@ class ExperienceReplayTorch(object):
         self.pos_pointer = 0
         self.replay_filled_event = Event()
         self.env_state_dim = env_state_dim
+        self.batch_lock = batch_lock
 
         if state_compression:
             self.states = []
@@ -40,9 +41,10 @@ class ExperienceReplayTorch(object):
         self.not_done[index] = kwargs['not_done']
 
     def store_next(self, **kwargs):
-        index = self.calc_index(**kwargs)
-        if index == -1:
-            return
+        with self.batch_lock:
+            index = self.calc_index(**kwargs)
+            if index == -1:
+                return
         self._store(index, **kwargs)
 
     def calc_index(self, **kwargs):

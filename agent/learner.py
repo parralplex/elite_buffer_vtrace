@@ -5,7 +5,6 @@ import random
 import numpy as np
 import torch.backends.cudnn
 
-
 from agent.algorithms.v_trace import v_trace
 from agent.manager.native_worker_manager import NativeWorkerManager
 from rollout_storage.elite_set.buf_population_strategy.lim_inf_strategy import LimInfStrategy
@@ -39,6 +38,7 @@ class Learner(object):
         else:
             print("CUDA IS NOT AVAILABLE")
         self.model = ModelNetwork(self.actions_count).to(self.device)
+        self.feature_reset_model = ModelNetwork(self.actions_count).eval()
 
         # self.model.load_state_dict(torch.load('results/BreakoutNoFrameskip-v4_1630692566/regular_model_save_.pt')["model_state_dict"])
 
@@ -56,6 +56,7 @@ class Learner(object):
                            LimInfStrategy(self.options_flags.elite_set_size))]
 
         self.learning_lock = threading.Lock()
+        self.batch_lock = threading.Lock()
 
         self.model_warmed_up_event = threading.Event()
 
@@ -127,6 +128,8 @@ class Learner(object):
 
             self._backprop(loss)
         self.worker_manager.update_model_data(self.model)
+        if self.options_flags.use_elite_set:
+            self._update_elite_features()
 
     def _foward_pass(self, states):
         current_logits, current_values = self.model(states.detach(), no_feature_vec=True)
@@ -163,5 +166,29 @@ class Learner(object):
             1, 0), not_done.to(self.device).transpose(1, 0)
 
         return actions, beh_logits, not_done, rewards, states
+
+    def _update_elite_features(self):
+        if self.training_iteration % 200 == 0:
+            with self.batch_lock:
+                print("recalculating features")
+                prior_states = self.replay_buffers[1].get_prior_buf_states()
+
+                self.feature_reset_model.load_state_dict({k: v.cpu() for k, v in self.model.state_dict().items()})
+
+                with torch.no_grad():
+                    _, _, feature_vecs_prior = self.feature_reset_model(prior_states, True)
+                self.replay_buffers[1].set_feature_vecs_prior(feature_vecs_prior)
+
+                # feature_vecoefs = None
+                # for j in range(6):
+                #     with torch.no_grad():
+                #         _, _, feature_vecoefs_prior = self.model(prior_states[j*100:(j+1)*100].cuda(), True)
+                #     if feature_vecoefs is None:
+                #         feature_vecoefs = feature_vecoefs_prior.cpu()
+                #     else:
+                #         feature_vecoefs = torch.cat((feature_vecoefs, feature_vecoefs_prior.cpu()), 0)
+                # self.replay_buffer.set_feature_vecoefs_prior(feature_vecoefs)
+
+                print("recalculating features DONE")
 
 
