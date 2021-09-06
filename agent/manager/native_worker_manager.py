@@ -5,8 +5,8 @@ from torch.multiprocessing import Queue, Manager
 
 
 class NativeWorkerManager(WorkerManagerBase):
-    def __init__(self, async, stop_event, replay_writer, replay_buffers, options_flags, observation_shape, actions_count, model):
-        super().__init__(async, stop_event, replay_writer, replay_buffers)
+    def __init__(self, async, stop_event, replay_writer, replay_buffers, options_flags, observation_shape, actions_count, model, stats):
+        super().__init__(async, stop_event, replay_writer, replay_buffers, stats)
         self.workers = []
         self.worker_data_queue = Queue(maxsize=10)
         self.shared_list = Manager().list()

@@ -4,6 +4,7 @@ import os
 import random
 import numpy as np
 import torch.backends.cudnn
+import datetime as dt
 
 from agent.algorithms.v_trace import v_trace
 from agent.manager.native_worker_manager import NativeWorkerManager
@@ -15,6 +16,7 @@ from rollout_storage.writer_queue.keep_latest_strategy import KeepLatestStrategy
 from rollout_storage.writer_queue.replay_buffer_writer import ReplayWriterQueue
 from torch.optim import Adam
 from model.network import ModelNetwork
+from stats.stats import Statistics
 
 
 class Learner(object):
@@ -28,6 +30,12 @@ class Learner(object):
             torch.manual_seed(options_flags.seed)
             np.random.seed(options_flags.seed)
             random.seed(options_flags.seed)
+
+        self.run_ID = int(dt.datetime.timestamp(dt.datetime.now()))
+        self.file_save_dir_ulr = "results/" + self.options_flags.env + "_" + str(self.run_ID)
+        os.makedirs(self.file_save_dir_ulr)
+
+        self.stats = Statistics(self.file_save_dir_ulr, True)
 
         self.options_flags = options_flags
         self.observation_shape = observation_shape
@@ -45,22 +53,23 @@ class Learner(object):
         self.optimizer = Adam(self.model.parameters(), lr=self.options_flags.lr)
 
         # self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=2000, T_mult=1)
-        self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,0.9999)
+        self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.9999)
+
+        self.learning_lock = threading.Lock()
+        self.batch_lock = threading.Lock()
 
         self.replay_buffers = [
             ExperienceReplayTorch(self.options_flags.buffer_size, self.options_flags.replay_data_ratio,
-                                  self.options_flags, self.actions_count, self.observation_shape),
+                                  self.options_flags, self.actions_count, self.observation_shape, self.batch_lock),
             EliteSetReplay(self.options_flags.elite_set_size, self.options_flags.elite_set_data_ratio,
                            self.options_flags, self.actions_count, self.observation_shape,
                            True, (self.model.get_flatten_layer_output_size(),),
                            LimInfStrategy(self.options_flags.elite_set_size))]
 
-        self.learning_lock = threading.Lock()
-        self.batch_lock = threading.Lock()
-
         self.model_warmed_up_event = threading.Event()
 
-        self.replay_writer = ReplayWriterQueue(self.replay_buffers, queue_size=10, fill_in_strategy=KeepLatestStrategy())
+        self.replay_writer = ReplayWriterQueue(self.replay_buffers, queue_size=10,
+                                               fill_in_strategy=KeepLatestStrategy())
         self.replay_writer.start()
 
         self.stop_event = threading.Event()
@@ -68,8 +77,9 @@ class Learner(object):
         self.training_iteration = 0
 
         self.training_event = threading.Event()
-        self.worker_manager = NativeWorkerManager(True, self.stop_event, self.replay_writer, self.replay_buffers, self.options_flags,
-                                             self.observation_shape, self.actions_count,  self.model)
+        self.worker_manager = NativeWorkerManager(True, self.stop_event, self.replay_writer, self.replay_buffers,
+                                                  self.options_flags,
+                                                  self.observation_shape, self.actions_count, self.model, self.stats)
 
     def start_async(self):
         threads = []
@@ -86,8 +96,11 @@ class Learner(object):
         for thread in threads:
             thread.join()
 
+        self.stats.close()
+
     def start_sync(self):
         self.worker_manager.manage_workers(self._learning_iteration, True)
+        self.stats.close()
 
     def learning(self):
         for p in range(len(self.replay_buffers)):
@@ -95,6 +108,7 @@ class Learner(object):
         # self.model_warmed_up_event.wait()  TODO WARM_UP PERIOD EVENT WHEN CONTINUING LEARNING PROCESS FROM MODEL SAVED IN FILE
 
         self.training_event.set()
+        self.stats.mark_warm_up_period()
         while self.training_iteration < self.options_flags.training_max_steps:
             if self.stop_event.is_set():
                 break
@@ -113,23 +127,24 @@ class Learner(object):
             if self.training_iteration >= self.options_flags.training_max_steps:
                 self.stop_event.set()
                 return
-        self.training_iteration += 1
 
         actions, beh_logits, not_done, rewards, states = self._prepare_batch()
 
         with self.learning_lock:
+            self.training_iteration += 1
             bootstrap_value, current_logits, current_values = self._foward_pass(states)
 
             baseline_loss, entropy_loss, policy_loss = v_trace(actions, beh_logits, bootstrap_value,
                                                                current_logits, current_values, not_done, rewards,
                                                                self.options_flags, self.device)
 
-            loss = policy_loss + baseline_loss + entropy_loss
+            self._backprop(policy_loss, baseline_loss, entropy_loss)
 
-            self._backprop(loss)
         self.worker_manager.update_model_data(self.model)
         if self.options_flags.use_elite_set:
             self._update_elite_features()
+        if self.training_iteration % 1000 == 0:
+            self._save_current_model_state()
 
     def _foward_pass(self, states):
         current_logits, current_values = self.model(states.detach(), no_feature_vec=True)
@@ -139,14 +154,14 @@ class Learner(object):
 
         return bootstrap_value, current_logits, current_values
 
-    def _backprop(self, loss):
+    def _backprop(self, policy_loss, baseline_loss, entropy_loss):
+        loss = policy_loss + baseline_loss + entropy_loss
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.options_flags.max_grad_norm)
         self.optimizer.step()
         self.lr_scheduler.step()
-        # loss_file.write([str(policy_loss.item()) + ',' + str(baseline_loss.item()) + ',' + str(entropy_loss.item())])
-        # lr_file.write([str(lr_scheduler.get_last_lr()[0])])  TODO add to stats
+        self.stats.process_learning_iter(policy_loss.item(), baseline_loss.item(), entropy_loss.item(), self.lr_scheduler.get_last_lr()[0])
 
     def _prepare_batch(self):
         states, actions, rewards, beh_logits, not_done = self.replay_buffers[0].random_sample(
@@ -191,4 +206,18 @@ class Learner(object):
 
                 print("recalculating features DONE")
 
+    def _save_current_model_state(self):
+        torch.save({"model_state_dict": self.model.state_dict(),
+                    "optimizer_state_dict": self.optimizer.state_dict(),
+                    "scheduler_state_dict": self.lr_scheduler.state_dict(),
+                    "flags": vars(self.options_flags),
+                    },
+                   self.file_save_dir_ulr + '/regular_model_save_.pt')
 
+    def _load_model_state(self, url):
+        # TODO check if url is valid
+        state_dict = torch.load(url)
+        self.model.load_state_dict(state_dict["model_state_dict"])
+        self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
+        self.lr_scheduler.load_state_dict(state_dict["scheduler_state_dict"])
+        self.options_flags = state_dict["flags"]

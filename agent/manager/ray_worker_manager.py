@@ -5,8 +5,8 @@ from agent.manager.worker_manager_base import WorkerManagerBase
 
 
 class RayWorkerManager(WorkerManagerBase):
-    def __init__(self, async, stop_event, replay_writer, replay_buffers, options_flags, observation_shape, actions_count, training_event, model):
-        super().__init__(async, stop_event, replay_writer, replay_buffers)
+    def __init__(self, async, stop_event, replay_writer, replay_buffers, options_flags, observation_shape, actions_count, training_event, model, stats):
+        super().__init__(async, stop_event, replay_writer, replay_buffers, stats)
         self.workers = []
 
         for i in range(options_flags.actor_count):

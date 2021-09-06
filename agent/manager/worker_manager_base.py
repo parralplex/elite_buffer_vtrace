@@ -1,16 +1,14 @@
 import abc
-import numpy as np
-import sys
 from utils import compress
-from queue import Queue
 
 
 class WorkerManagerBase(metaclass=abc.ABCMeta):
-    def __init__(self, async, stop_event, replay_writer, replay_buffers):
+    def __init__(self, async, stop_event, replay_writer, replay_buffers, stats):
         self.async = async
         self.replay_writer = replay_writer
         self.replay_buffers = replay_buffers
         self.stop_event = stop_event
+        self.stats = stats
 
     @classmethod
     def __subclasshook__(cls, subclass):
@@ -22,34 +20,16 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
                 callable(subclass.update_model_data))
 
     def manage_workers(self, post_processing_func=None, *args):
-        episode = 0
-        score_queue = Queue(maxsize=100)
-        rew_avg = -sys.maxsize
-        max_avg_reward = -sys.maxsize
         while True:
             if self.stop_event.is_set():
                 self.clean_up()
                 break
             self.pre_processing()
             workers_data = self.plan_and_execute_workers()
-    #         TODO callback to update statistics
             for i in range(len(workers_data)):
                 self.store_worker_data(workers_data[i][0])
-                _, actor_index, rewards, ep_steps = workers_data[i]
-                episode += len(rewards)
-
-                for k in range(len(rewards)):
-                    if score_queue.full():
-                        score_queue.get()
-                    score_queue.put(rewards[k])
-
-                if not score_queue.empty():
-                    rew_avg = np.average(list(score_queue.queue))
-                    if rew_avg > max_avg_reward:
-                        max_avg_reward = rew_avg
-                        print("New MAX average reward per 100/ep: ", max_avg_reward)
-
-                # print('Episode ', episode,"  Avg. reward 100/ep: ", rew_avg)
+                _, _, rewards, ep_steps = workers_data[i]
+                self.stats.process_worker_rollout(rewards, ep_steps)
             if not self.async:
                 post_processing_func(args[0])
 
