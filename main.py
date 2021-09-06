@@ -1,20 +1,18 @@
 import os
-import ray
-import torch
 
-from model.network import ModelNetwork
 from wrappers import atari_wrappers
 
-from agent.rollout_worker import RolloutWorker
-from agent.learner import Learner
+from agent.learner import Learner1
 from option_flags import get_flags
+import torch.multiprocessing as mp
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
 
 if __name__ == '__main__':
+    mp.set_start_method('spawn')
 
-    ray.init()
+    # ray.init()
 
     options_flags = get_flags()
 
@@ -37,12 +35,16 @@ if __name__ == '__main__':
     for j in range(1):
         actors = []
         try:
-            for i in range(options_flags.actor_count):
-                actors.append(RolloutWorker.remote(options_flags, observation_shape, actions_count, i))
+            # for i in range(options_flags.actor_count):
+            #     actors.append(RolloutWorker.remote(options_flags, observation_shape, actions_count, i))
 
-            learner = Learner.remote(actors, observation_shape, actions_count, options_flags)
-            learner_handle = learner.act.remote()
-            ray.wait([learner_handle])
+            # learner = Learner.remote(actors, observation_shape, actions_count, options_flags)
+            # learner_handle = learner.act.remote()
+            # ray.wait([learner_handle])
+
+            learner = Learner1(observation_shape, actions_count, options_flags)
+            learner_handle = learner.start_async()
+
 
         except Exception as e:
             # TODO log this error into the file
