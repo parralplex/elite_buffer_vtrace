@@ -2,15 +2,16 @@ import ray
 
 from agent.worker.ray_rollout_worker import RayRolloutWorker
 from agent.manager.worker_manager_base import WorkerManagerBase
+from option_flags import flags
 
 
 class RayWorkerManager(WorkerManagerBase):
-    def __init__(self, async, stop_event, replay_writer, replay_buffers, options_flags, observation_shape, actions_count, training_event, model, stats):
-        super().__init__(async, stop_event, replay_writer, replay_buffers, stats)
+    def __init__(self, stop_event, replay_writer, replay_buffers, training_event, model, stats):
+        super().__init__(stop_event, replay_writer, replay_buffers, stats)
         self.workers = []
 
-        for i in range(options_flags.actor_count):
-            self.workers.append(RayRolloutWorker.remote(options_flags, observation_shape, actions_count, i))
+        for i in range(flags.worker_count):
+            self.workers.append(RayRolloutWorker.remote(i))
         self.done_ref = None
         self.rollouts = []
         self.training_event = training_event
@@ -18,7 +19,7 @@ class RayWorkerManager(WorkerManagerBase):
         self.active_worker_indices = [i for i in range(len(self.workers))]
 
     def plan_and_execute_workers(self):
-        if self.async:
+        if not flags.reproducible:
             self.done_ref, self.rollouts = ray.wait(self.rollouts, num_returns=1)
         else:
             self.done_ref, self.rollouts = ray.wait(self.rollouts, num_returns=len(self.workers))
@@ -34,7 +35,7 @@ class RayWorkerManager(WorkerManagerBase):
 
     def pre_processing(self):
         for j in range(len(self.active_worker_indices)):
-            if self.training_event.is_set() or self.async:
+            if self.training_event.is_set() or flags.reproducible:
                 self.rollouts.extend([self.workers[self.active_worker_indices[j]].performing.remote(self.model_dict_ref, update=True)])
             else:
                 self.rollouts.extend([self.workers[self.active_worker_indices[j]].performing.remote()])

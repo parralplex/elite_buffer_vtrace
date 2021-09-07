@@ -1,85 +1,84 @@
 import torch
 import threading
 import os
-import random
-import numpy as np
 import torch.backends.cudnn
 import datetime as dt
+import json
 
 from agent.algorithms.v_trace import v_trace
 from agent.manager.native_worker_manager import NativeWorkerManager
+from agent.manager.ray_worker_manager import RayWorkerManager
+from rollout_storage.elite_set.buf_population_strategy.brute_force_strategy import BruteForceStrategy
 from rollout_storage.elite_set.buf_population_strategy.lim_inf_strategy import LimInfStrategy
+from rollout_storage.elite_set.buf_population_strategy.lim_zero_strategy import LimZeroStrategy
 from rollout_storage.elite_set.elite_set_replay import EliteSetReplay
 from rollout_storage.experience_replay import ExperienceReplayTorch
+from rollout_storage.writer_queue.alternating_strategy import AlternatingStrategy
 from rollout_storage.writer_queue.keep_latest_strategy import KeepLatestStrategy
+from rollout_storage.writer_queue.keep_oldest_strategy import KeepOldestStrategy
 
 from rollout_storage.writer_queue.replay_buffer_writer import ReplayWriterQueue
 from torch.optim import Adam
 from model.network import ModelNetwork
 from stats.stats import Statistics
+from option_flags import flags, set_flags
 
 
 class Learner(object):
-    def __init__(self, observation_shape, actions_count, options_flags):
-        if options_flags.reproducible:
-            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-
-            torch.set_deterministic(True)
-            torch.cuda.manual_seed(options_flags.seed)
-            torch.cuda.manual_seed_all(options_flags.seed)
-            torch.manual_seed(options_flags.seed)
-            np.random.seed(options_flags.seed)
-            random.seed(options_flags.seed)
-
+    def __init__(self):
         self.run_ID = int(dt.datetime.timestamp(dt.datetime.now()))
-        self.file_save_dir_ulr = "results/" + self.options_flags.env + "_" + str(self.run_ID)
-        os.makedirs(self.file_save_dir_ulr)
+        self.file_save_dir_url = "results/" + flags.env + "_" + str(self.run_ID)
+        os.makedirs(self.file_save_dir_url)
 
-        self.stats = Statistics(self.file_save_dir_ulr, True)
-
-        self.options_flags = options_flags
-        self.observation_shape = observation_shape
-        self.actions_count = actions_count
+        self.stats = Statistics(self.file_save_dir_url, True)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             print("Learner is using CUDA")
         else:
             print("CUDA IS NOT AVAILABLE")
-        self.model = ModelNetwork(self.actions_count).to(self.device)
-        self.feature_reset_model = ModelNetwork(self.actions_count).eval()
+        self.model = ModelNetwork(flags.actions_count).to(self.device)
+        self.feature_reset_model = ModelNetwork(flags.actions_count).eval()
 
-        # self.model.load_state_dict(torch.load('results/BreakoutNoFrameskip-v4_1630692566/regular_model_save_.pt')["model_state_dict"])
+        if flags.op_mode == "train_w_load":
+            self.model.load_state_dict(torch.load(flags.load_model_uri)["model_state_dict"])
 
-        self.optimizer = Adam(self.model.parameters(), lr=self.options_flags.lr)
+        self.optimizer = Adam(self.model.parameters(), lr=flags.lr)
 
-        # self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=2000, T_mult=1)
         self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.9999)
 
         self.learning_lock = threading.Lock()
         self.batch_lock = threading.Lock()
-
-        self.replay_buffers = [
-            ExperienceReplayTorch(self.options_flags.buffer_size, self.options_flags.replay_data_ratio,
-                                  self.options_flags, self.actions_count, self.observation_shape, self.batch_lock),
-            EliteSetReplay(self.options_flags.elite_set_size, self.options_flags.elite_set_data_ratio,
-                           self.options_flags, self.actions_count, self.observation_shape,
-                           True, (self.model.get_flatten_layer_output_size(),),
-                           LimInfStrategy(self.options_flags.elite_set_size))]
-
-        self.model_warmed_up_event = threading.Event()
-
-        self.replay_writer = ReplayWriterQueue(self.replay_buffers, queue_size=10,
-                                               fill_in_strategy=KeepLatestStrategy())
-        self.replay_writer.start()
-
         self.stop_event = threading.Event()
+        self.training_event = threading.Event()
 
         self.training_iteration = 0
 
-        self.training_event = threading.Event()
-        self.worker_manager = NativeWorkerManager(True, self.stop_event, self.replay_writer, self.replay_buffers,
-                                                  self.options_flags,
-                                                  self.observation_shape, self.actions_count, self.model, self.stats)
+        self.replay_buffers = [ExperienceReplayTorch(self.batch_lock)]
+        if flags.use_elite_set:
+            elite_pop_strategy = None
+            if flags.elite_pop_strategy == "lim_zero":
+                elite_pop_strategy = LimZeroStrategy()
+            elif flags.elite_pop_strategy == "lim_inf":
+                elite_pop_strategy = LimInfStrategy()
+            elif flags.elite_pop_strategy == "brute_force":
+                elite_pop_strategy = BruteForceStrategy()
+            self.replay_buffers.append(EliteSetReplay(self.batch_lock, (self.model.get_flatten_layer_output_size(),), elite_pop_strategy))
+
+        replay_writer_strategy = None
+        if flags.discarding_strategy == "keep_latest":
+            replay_writer_strategy = KeepLatestStrategy()
+        elif flags.discarding_strategy == "keep_oldest":
+            replay_writer_strategy = KeepOldestStrategy()
+        elif flags.discarding_strategy == "alternating":
+            replay_writer_strategy = AlternatingStrategy()
+        self.replay_writer = ReplayWriterQueue(self.replay_buffers, queue_size=flags.replay_writer_cache_size,
+                                               fill_in_strategy=replay_writer_strategy)
+        self.replay_writer.start()
+
+        if flags.multiprocessing_backend == "ray":
+            self.worker_manager = RayWorkerManager(self.stop_event, self.replay_writer, self.replay_buffers, self.training_event, self.model, self.stats)
+        elif flags.multiprocessing_backend == "python_native":
+            self.worker_manager = NativeWorkerManager(self.stop_event, self.replay_writer, self.replay_buffers, self.model, self.stats)
 
     def start_async(self):
         threads = []
@@ -87,29 +86,29 @@ class Learner(object):
         thread.start()
         threads.append(thread)
 
-        if not self.options_flags.reproducible:
-            for i in range(3):
-                thread = threading.Thread(target=self.learning, name="learning_thread-%d" % i)
-                thread.start()
-                threads.append(thread)
+        for i in range(flags.learner_thread_count):
+            thread = threading.Thread(target=self.learning, name="learning_thread-%d" % i)
+            thread.start()
+            threads.append(thread)
 
         for thread in threads:
             thread.join()
 
+        self._save_current_model_state()
         self.stats.close()
 
     def start_sync(self):
         self.worker_manager.manage_workers(self._learning_iteration, True)
+        self._save_current_model_state()
         self.stats.close()
 
     def learning(self):
         for p in range(len(self.replay_buffers)):
             self.replay_buffers[p].replay_filled_event.wait()
-        # self.model_warmed_up_event.wait()  TODO WARM_UP PERIOD EVENT WHEN CONTINUING LEARNING PROCESS FROM MODEL SAVED IN FILE
 
         self.training_event.set()
         self.stats.mark_warm_up_period()
-        while self.training_iteration < self.options_flags.training_max_steps:
+        while self.training_iteration < flags.training_max_steps:
             if self.stop_event.is_set():
                 break
             self._learning_iteration()
@@ -120,11 +119,9 @@ class Learner(object):
             for p in range(len(self.replay_buffers)):
                 if not self.replay_buffers[p].replay_filled_event.is_set():
                     return
-            if not self.model_warmed_up_event.is_set():
-                return
             if not self.training_event.is_set():
                 self.training_event.set()
-            if self.training_iteration >= self.options_flags.training_max_steps:
+            if self.training_iteration >= flags.training_max_steps:
                 self.stop_event.set()
                 return
 
@@ -135,15 +132,14 @@ class Learner(object):
             bootstrap_value, current_logits, current_values = self._foward_pass(states)
 
             baseline_loss, entropy_loss, policy_loss = v_trace(actions, beh_logits, bootstrap_value,
-                                                               current_logits, current_values, not_done, rewards,
-                                                               self.options_flags, self.device)
+                                                               current_logits, current_values, not_done, rewards, self.device)
 
             self._backprop(policy_loss, baseline_loss, entropy_loss)
 
         self.worker_manager.update_model_data(self.model)
-        if self.options_flags.use_elite_set:
+        if flags.use_elite_set:
             self._update_elite_features()
-        if self.training_iteration % 1000 == 0:
+        if self.training_iteration % flags.save_model_period == 0:
             self._save_current_model_state()
 
     def _foward_pass(self, states):
@@ -158,18 +154,18 @@ class Learner(object):
         loss = policy_loss + baseline_loss + entropy_loss
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.options_flags.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), flags.max_grad_norm)
         self.optimizer.step()
         self.lr_scheduler.step()
         self.stats.process_learning_iter(policy_loss.item(), baseline_loss.item(), entropy_loss.item(), self.lr_scheduler.get_last_lr()[0])
 
     def _prepare_batch(self):
         states, actions, rewards, beh_logits, not_done = self.replay_buffers[0].random_sample(
-            self.options_flags.batch_size)
+            flags.batch_size)
 
         for i in range(1, len(self.replay_buffers)):
             states_n, actions_n, rewards_n, beh_logits_n, not_done_n = self.replay_buffers[i].random_sample(
-                self.options_flags.batch_size)
+                flags.batch_size)
             states = torch.cat((states, states_n), 0)
             actions = torch.cat((actions, actions_n), 0)
             rewards = torch.cat((rewards, rewards_n), 0)
@@ -183,7 +179,7 @@ class Learner(object):
         return actions, beh_logits, not_done, rewards, states
 
     def _update_elite_features(self):
-        if self.training_iteration % 200 == 0:
+        if self.training_iteration % flags.elite_reset_period == 0:
             with self.batch_lock:
                 print("recalculating features")
                 prior_states = self.replay_buffers[1].get_prior_buf_states()
@@ -210,9 +206,11 @@ class Learner(object):
         torch.save({"model_state_dict": self.model.state_dict(),
                     "optimizer_state_dict": self.optimizer.state_dict(),
                     "scheduler_state_dict": self.lr_scheduler.state_dict(),
-                    "flags": vars(self.options_flags),
+                    "flags": vars(flags),
                     },
-                   self.file_save_dir_ulr + '/regular_model_save_.pt')
+                   self.file_save_dir_url + '/regular_model_save_.pt')
+        with open(self.file_save_dir_url + '/options_flags.json', 'w') as file:
+            json.dump(flags.__dict__, file, indent=2)
 
     def _load_model_state(self, url):
         # TODO check if url is valid
@@ -220,4 +218,4 @@ class Learner(object):
         self.model.load_state_dict(state_dict["model_state_dict"])
         self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
         self.lr_scheduler.load_state_dict(state_dict["scheduler_state_dict"])
-        self.options_flags = state_dict["flags"]
+        set_flags(state_dict["flags"])

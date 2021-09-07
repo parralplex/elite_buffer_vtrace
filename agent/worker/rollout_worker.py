@@ -1,3 +1,5 @@
+import sys
+
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -8,41 +10,39 @@ from wrappers import atari_wrappers
 from rollout_storage.worker_buf.torch_worker_buffer import TorchWorkerBuffer
 from queue import Queue
 from model.network import ModelNetwork
+from option_flags import flags
 
 
 class RolloutWorker(object):
-    def __init__(self, options_flags, observation_shape, action_count, id, verbose=False):
+    def __init__(self, id, verbose=False):
         self.device = torch.device("cpu")
-        self.options_flags = options_flags
         self.verbose = verbose
-        if options_flags.reproducible:
-            torch.cuda.manual_seed(options_flags.seed)
-            torch.cuda.manual_seed_all(options_flags.seed)
-            torch.manual_seed(options_flags.seed)
-            np.random.seed(options_flags.seed)
-            random.seed(options_flags.seed)
+        if flags.reproducible:
+            torch.cuda.manual_seed(flags.seed)
+            torch.cuda.manual_seed_all(flags.seed)
+            torch.manual_seed(flags.seed)
+            np.random.seed(flags.seed)
+            random.seed(flags.seed)
 
-        self.model = ModelNetwork(action_count).eval()
+        self.model = ModelNetwork(flags.actions_count).eval()
 
-        self.env_state_dim = observation_shape
-        self.action_count = action_count
         self.feature_vec_dim = self.model.get_flatten_layer_output_size()
         self.actor_id = id
 
-        self.episode_rewards = Queue(maxsize=options_flags.avg_buff_size)
-        self.max_avg_reward = -100000000
+        self.episode_rewards = Queue(maxsize=flags.avg_buff_size)
+        self.max_avg_reward = -sys.maxsize
         self.env_steps = []
         self.rewards = []
         self.observations = []
         self.workers_buffers = []
         self.workers_envs = []
 
-        for i in range(self.options_flags.envs_per_actor):
+        for i in range(flags.envs_per_worker):
             self.rewards.append(0.0)
             self.env_steps.append(0)
             env = atari_wrappers.wrap_pytorch(
                 atari_wrappers.wrap_deepmind(
-                    atari_wrappers.make_atari(self.options_flags.env, self.options_flags.seed),
+                    atari_wrappers.make_atari(flags.env, flags.seed),
                     episode_life=True,
                     clip_rewards=False,
                     frame_stack=True,
@@ -52,7 +52,7 @@ class RolloutWorker(object):
 
             self.workers_envs.append(env)
             self.workers_buffers.append(
-                TorchWorkerBuffer(self.options_flags.r_f_steps, self.env_state_dim, self.action_count,
+                TorchWorkerBuffer(flags.r_f_steps, flags.observation_shape, flags.actions_count,
                                   (self.feature_vec_dim,)))
             init_state = torch.from_numpy(self.workers_envs[i].reset()).float()
             self.observations.append(init_state)
@@ -74,7 +74,7 @@ class RolloutWorker(object):
                 self.workers_buffers[i].reset()
                 self.workers_buffers[i].states[0] = self.observations[i]
 
-            for step in range(self.options_flags.r_f_steps):
+            for step in range(flags.r_f_steps):
                 with torch.no_grad():
                     logits, _, feature_vecs = self.model(self.observations)
 
@@ -114,7 +114,7 @@ class RolloutWorker(object):
                     self.max_avg_reward = avg_rew
                     print("worker_buf: " + str(self.actor_id) + " New MAX avg(100) reward: ", self.max_avg_reward)
 
-                if self.iteration_counter % 25 == 0:
+                if self.iteration_counter % flags.verbose_output_interval == 0:
                     print('worker_buf ' + str(self.actor_id) + '  WorkerIteration: ', self.iteration_counter, "  Avg. reward 100/ep: ",
                               avg_rew)
 

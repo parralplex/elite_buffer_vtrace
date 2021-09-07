@@ -1,8 +1,9 @@
+from option_flags import flags
+
 
 class WorkerBufferBase(object):
-    def __init__(self, r_f_steps):
+    def __init__(self):
         self.pos_pointer = 0
-        self.r_f_steps = r_f_steps
         self.states = None
         self.rewards = None
         self.actions = None
@@ -19,7 +20,7 @@ class WorkerBufferBase(object):
         self.not_done[self.pos_pointer] = not_done
         self.feature_vec[self.pos_pointer] = feature_vec
 
-        self.pos_pointer = (self.pos_pointer + 1) % self.r_f_steps
+        self.pos_pointer = (self.pos_pointer + 1) % flags.r_f_steps
 
     def reset(self):
         self.pos_pointer = 0

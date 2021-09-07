@@ -3,6 +3,7 @@ from threading import Thread
 
 from rollout_storage.intefaces.replay_fill_queue_strategy import ReplayFillQueueStrategy
 from utils import compress
+from option_flags import flags
 
 
 class ReplayWriterQueue:
@@ -26,15 +27,18 @@ class ReplayWriterQueue:
                 continue
             for i in range(len(worker_data)):
                 for j in range(len(self.replay_buffers)):
-                    self.replay_buffers[j].store_next(state=compress(worker_data[i].states),
+                    state = worker_data[i].states
+                    if flags.use_state_compression:
+                        state = compress(state)
+                    self.replay_buffers[j].store_next(state=state,
                                                       action=worker_data[i].actions,
                                                       reward=worker_data[i].rewards,
                                                       logits=worker_data[i].logits,
                                                       not_done=worker_data[i].not_done,
                                                       feature_vec=worker_data[i].feature_vec,
-                                                      random_search=True,
-                                                      add_rew_feature=True,
-                                                      p=2)
+                                                      random_search=flags.random_search,
+                                                      add_rew_feature=flags.add_rew_feature,
+                                                      p=flags.p)
             self.queue.task_done()
 
     def close(self):

@@ -3,12 +3,12 @@ import torch
 
 from rollout_storage.intefaces.elite_set_insert_strategy import EliteSetInsertStrategy
 from rollout_storage.elite_set.decoratos.rand_ouput import rand_output
+from option_flags import flags
 
 
 class BruteForceStrategy(EliteSetInsertStrategy):
-    def __init__(self, buf_size):
-        super().__init__(buf_size)
-        self.buf_size = buf_size
+    def __init__(self):
+        super().__init__()
         self.buf_distances_sum = 0
         self.buf_distances = []
 
@@ -16,7 +16,7 @@ class BruteForceStrategy(EliteSetInsertStrategy):
         self.new_tr_dis_sum = 0
         self.swap_index = -1
 
-    @rand_output(chance=0)
+    @rand_output(chance=flags.rnd_index_chance)
     def calculate_best_index_pos(self, feature_vecs, new_feature_vec, new_reward, **kwargs):
         entry_rew = torch.sum(new_reward)
 
@@ -34,10 +34,10 @@ class BruteForceStrategy(EliteSetInsertStrategy):
 
         offset = 0
         if kwargs["random_search"]:
-            offset = random.randint(0, self.buf_size - 1)
-        for i in range(self.buf_size):
+            offset = random.randint(0, flags.elite_set_size - 1)
+        for i in range(flags.elite_set_size):
             if kwargs["random_search"]:
-                index = (i + offset) % self.buf_size
+                index = (i + offset) % flags.elite_set_size
             else:
                 index = i
             new_buff_dis_sum = (self.buf_distances_sum - self.buf_distances[index]) + self.new_tr_dis_sum - \

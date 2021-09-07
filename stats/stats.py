@@ -4,6 +4,7 @@ import datetime as dt
 from queue import Queue
 
 from stats.safe_file_writer import SafeOrderedMultiFileWriter
+from option_flags import flags
 
 
 stat_file_names = ["/Scores.txt", "/Train_time.txt", "/Episode_steps.txt", "/Loss_file.txt",
@@ -11,21 +12,21 @@ stat_file_names = ["/Scores.txt", "/Train_time.txt", "/Episode_steps.txt", "/Los
 
 
 class Statistics(object):
-    def __init__(self, file_save_dir_ulr, verbose=False):
+    def __init__(self, file_save_dir_url, verbose=False):
         self.warm_up_period = 0
         self.max_reward = -sys.maxsize
         self.max_avg_reward = -sys.maxsize
-        self.file_writer = SafeOrderedMultiFileWriter(self._generate_file_urls(stat_file_names, file_save_dir_ulr))
+        self.file_writer = SafeOrderedMultiFileWriter(self._generate_file_urls(stat_file_names, file_save_dir_url))
         self.file_writer.start()
         self.verbose = verbose
-        self.file_save_dir_ulr = file_save_dir_ulr
+        self.file_save_dir_url = file_save_dir_url
 
         self.episodes = 0
         self.START_TIME = dt.datetime.now()
         self.WARM_UP_TIME = dt.datetime.now()
         self.worker_rollout_counter = 0
         self.train_iter_counter = 0
-        self.score_queue = Queue(maxsize=100)
+        self.score_queue = Queue(maxsize=flags.avg_buff_size)
         self.last_lr = 0
 
     @staticmethod
@@ -71,7 +72,7 @@ class Statistics(object):
                 self.max_avg_reward = rew_avg
                 print("New MAX average reward per 100/ep: ", self.max_avg_reward)
 
-        if self.worker_rollout_counter % 50 == 0:
+        if self.worker_rollout_counter % flags.verbose_output_interval == 0:
             print('Episode ', self.episodes, '  Iteration: ', self.worker_rollout_counter, "  Avg. reward 100/ep: ",
                   rew_avg, " Training iterations: ", self.train_iter_counter)
 
@@ -81,13 +82,13 @@ class Statistics(object):
         self.file_writer.write([str(policy_loss) + ',' + str(baseline_loss) + ',' + str(entropy_loss)], 3)
         self.file_writer.write([str(lr)])
 
-        if self.verbose and self.train_iter_counter % 50 == 0:
+        if self.verbose and self.train_iter_counter % flags.verbose_output_interval == 0:
             print("Training iterations: ", self.train_iter_counter, " Lr:", lr, " Total_loss:", policy_loss+baseline_loss+entropy_loss,
                   " Policy_loss:", policy_loss, " Baseline_loss:", baseline_loss, " Entropy_loss:", entropy_loss)
 
     def close(self):
         self.file_writer.close()
-        stats_file_desc = open(self.file_save_dir_ulr, "w", 1)
+        stats_file_desc = open(self.file_save_dir_url, "w", 1)
         stats_file_desc.write("Warm_up_period: " + str(self.warm_up_period) + '\n')
         stats_file_desc.write("Max_reach_reward: " + str(self.max_reward) + '\n')
         stats_file_desc.write("Max_avg(100)_reward: " + str(self.max_avg_reward) + '\n')

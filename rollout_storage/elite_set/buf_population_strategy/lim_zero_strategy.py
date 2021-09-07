@@ -3,18 +3,19 @@ import torch
 
 from rollout_storage.intefaces.elite_set_insert_strategy import EliteSetInsertStrategy
 from rollout_storage.elite_set.decoratos.rand_ouput import rand_output
+from option_flags import flags
 
 
 class LimZeroStrategy(EliteSetInsertStrategy):
-    def __init__(self, buf_size):
-        super().__init__(buf_size)
+    def __init__(self):
+        super().__init__()
         self.min_sum_reward = -sys.maxsize
-        self.rew_sum = torch.zeros(buf_size)
+        self.rew_sum = torch.zeros(flags.elite_set_size)
         self.entry_idx = 0
         self.entry_distance = sys.maxsize
         self.update_entry = True
 
-    @rand_output(chance=0)
+    @rand_output(chance=flags.rnd_index_chance)
     def calculate_best_index_pos(self, feature_vecs, new_feature_vec, new_reward, **kwargs):
         self.update_entry = True
         entry_rew = torch.sum(new_reward)

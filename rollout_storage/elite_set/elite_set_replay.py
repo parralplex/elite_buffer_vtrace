@@ -2,13 +2,14 @@ import torch
 from rollout_storage.experience_replay import ExperienceReplayTorch
 from rollout_storage.intefaces.elite_set_insert_strategy import EliteSetInsertStrategy
 from utils import decompress
+from option_flags import flags
 
 
 class EliteSetReplay(ExperienceReplayTorch):
-    def __init__(self, size, sample_ratio, options_flags, action_count, env_state_dim, state_compression, feature_vec_dim, insert_strategy : EliteSetInsertStrategy):
-        super().__init__(size, sample_ratio, options_flags, action_count, env_state_dim, state_compression)
+    def __init__(self, batch_lock, feature_vec_dim, insert_strategy : EliteSetInsertStrategy):
+        super().__init__(batch_lock)
 
-        self.feature_vecs = torch.zeros(options_flags.elite_set_size, options_flags.r_f_steps, *feature_vec_dim)
+        self.feature_vecs = torch.zeros(flags.elite_set_size, flags.r_f_steps, *feature_vec_dim)
         self.insert_strategy = insert_strategy
 
     def calc_index(self, **kwargs):
@@ -31,8 +32,8 @@ class EliteSetReplay(ExperienceReplayTorch):
             self.feature_vecs[index] = kwargs['feature_vec']
 
     def get_prior_buf_states(self):
-        if self.state_compression:
-            prior_states = torch.zeros(self.size, self.options_flags.r_f_steps, *self.env_state_dim)
+        if flags.use_state_compression:
+            prior_states = torch.zeros(flags.elite_set_size, flags.r_f_steps, *flags.observation_shape)
             for i in range(len(self.states)):
                 prior_states[i] = decompress(self.states[i])[:-1]
             return prior_states

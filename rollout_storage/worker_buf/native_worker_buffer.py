@@ -1,13 +1,14 @@
 from rollout_storage.intefaces.worker_buffer_base import WorkerBufferBase
+from option_flags import flags
 
 
 class NativeWorkerBuffer(WorkerBufferBase):
-    def __init__(self, r_f_steps):
-        super().__init__(r_f_steps)
-        self.states = [None] * r_f_steps + 1
-        self.rewards = [None] * r_f_steps
-        self.actions = [None] * r_f_steps
-        self.logits = [None] * r_f_steps
-        self.values = [None] * r_f_steps
-        self.not_done = [bool] * r_f_steps
-        self.feature_vec = [None] * r_f_steps
+    def __init__(self):
+        super().__init__()
+        self.states = [None] * flags.r_f_steps + 1
+        self.rewards = [None] * flags.r_f_steps
+        self.actions = [None] * flags.r_f_steps
+        self.logits = [None] * flags.r_f_steps
+        self.values = [None] * flags.r_f_steps
+        self.not_done = [bool] * flags.r_f_steps
+        self.feature_vec = [None] * flags.r_f_steps
