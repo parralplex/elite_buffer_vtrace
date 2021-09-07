@@ -1,14 +1,16 @@
+import os
 import sys
 import numpy as np
 import datetime as dt
 from queue import Queue
 
+from stats.data_plotter import set_global_chart_settings, create_chart
 from stats.safe_file_writer import SafeOrderedMultiFileWriter
 from option_flags import flags
 
 
-stat_file_names = ["/Scores.txt", "/Train_time.txt", "/Episode_steps.txt", "/Loss_file.txt",
-                   "/lr_file.txt", "/max_reward_file.txt"]
+stat_file_names = ["Scores.txt", "Train_time.txt", "Episode_steps.txt", "Loss_file.txt",
+                   "lr_file.txt", "max_reward_file.txt"]
 
 
 class Statistics(object):
@@ -34,7 +36,7 @@ class Statistics(object):
     def _generate_file_urls(names, path):
         urls = names
         for i in range(len(stat_file_names)):
-            urls[i] = path + names[i]
+            urls[i] = path + "/" + names[i]
         return urls
 
     def mark_warm_up_period(self):
@@ -112,3 +114,22 @@ class Statistics(object):
             stats_file_desc.write("Total_warm_up_time: " + str(self.WARM_UP_TIME - self.START_TIME) + '\n')
         stats_file_desc.flush()
         stats_file_desc.close()
+
+    def _create_charts(self):
+        avg_buf_size = self.episodes * 0.001
+        ignore_period = avg_buf_size / 2
+        os.mkdir(self.file_save_dir_url + "/Charts")
+        set_global_chart_settings()
+        create_chart(self.file_save_dir_url, stat_file_names[0], 'Episodes', 'Reward per episode', ["Avg(" + str(avg_buf_size) + ")"], "reward_chart.png", avg_buf_size)
+        create_chart(self.file_save_dir_url, stat_file_names[2], 'Episodes', 'Steps per episode', ["Avg(" + str(avg_buf_size) + ")"],
+                     "episode_steps_chart.png", avg_buf_size)
+        create_chart(self.file_save_dir_url, stat_file_names[5], 'Episodes', 'Avg Max reward', ["Avg(" + str(avg_buf_size) + ")max reward"],
+                     "max_avg_reward_chart.png", avg_buf_size)
+        create_chart(self.file_save_dir_url, stat_file_names[5], 'Episodes', 'Max reward', ["max reward"],
+                     "max_reward_chart.png", avg_buf_size, False)
+        create_chart(self.file_save_dir_url, stat_file_names[3], 'Training iteration', 'Loss',
+                     ["policy", "baseline", "entropy", "total"],
+                     "loss_chart.png", avg_buf_size, ignore_period)
+        create_chart(self.file_save_dir_url, stat_file_names[4], 'Training iteration', 'Learning rate decay',
+                     ["Avg(" + str(avg_buf_size) + ")"],
+                     "lr_decay_chart.png", avg_buf_size)
