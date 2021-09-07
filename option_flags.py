@@ -48,6 +48,7 @@ parser.add_argument("--shared_queue_size", type=int, default=10, help="Size of t
 # END OF TRAINING CONDITIONS
 parser.add_argument('--max_episodes', type=int, default=10000000, help='total number of episodes to be executed')
 parser.add_argument('--training_max_steps', type=int, default=10000000, help='total number of training iterations')
+parser.add_argument('--max_avg_reward', type=float, default=20.5, help='max avg(100) episode reword at which the training stops.')
 
 # REPLAY BUFFER
 parser.add_argument('--replay_writer_cache_size', type=int, default=10, help='how many worker observations(which are to be written to replay buffer) can be stored before some of them have to discarded to save memory')

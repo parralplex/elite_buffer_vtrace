@@ -5,11 +5,12 @@ from option_flags import flags
 
 
 class WorkerManagerBase(metaclass=abc.ABCMeta):
-    def __init__(self, stop_event, replay_writer, replay_buffers, stats):
+    def __init__(self, stop_event, training_event, replay_writer, replay_buffers, stats):
         self.replay_writer = replay_writer
         self.replay_buffers = replay_buffers
         self.stop_event = stop_event
         self.stats = stats
+        self.training_event = training_event
 
     @classmethod
     def __subclasshook__(cls, subclass):
@@ -66,4 +67,7 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     def clean_up(self):
-        pass
+        if not self.training_event.is_set():              # deadlock prevention
+            for p in range(len(self.replay_buffers)):
+                self.replay_buffers[p].replay_filled_event.set()
+

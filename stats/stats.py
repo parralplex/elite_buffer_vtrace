@@ -12,7 +12,8 @@ stat_file_names = ["/Scores.txt", "/Train_time.txt", "/Episode_steps.txt", "/Los
 
 
 class Statistics(object):
-    def __init__(self, file_save_dir_url, verbose=False):
+    def __init__(self, stop_event, file_save_dir_url, verbose=False):
+        self.stop_event = stop_event
         self.warm_up_period = 0
         self.max_reward = -sys.maxsize
         self.max_avg_reward = -sys.maxsize
@@ -54,23 +55,31 @@ class Statistics(object):
 
             self.file_writer.write([self.max_reward for _ in range(len(rewards))], 5)
 
+        new_max_rew = False
+        rew_avg = -sys.maxsize
+        if not self.score_queue.empty():
+            rew_avg = np.average(list(self.score_queue.queue))
+            if rew_avg > self.max_avg_reward:
+                self.max_avg_reward = rew_avg
+                new_max_rew = True
+                if self.max_avg_reward >= flags.max_avg_reward:
+                    self.stop_event.set()
+
         if len(rewards) > 0:
             self.file_writer.write([str(len(rewards)) + ',' + str(dt.datetime.now() - self.START_TIME) + ',' + str((dt.datetime.now() - self.START_TIME).total_seconds()) + "," + str(self.train_iter_counter)], 1)
         if self.verbose:
-            self._verbose_process_rollout(rewards)
+            self._verbose_process_rollout(rewards, new_max_rew, rew_avg)
+        if self.episodes >= flags.max_episodes:
+            self.stop_event.set()
 
-    def _verbose_process_rollout(self, rewards):
+    def _verbose_process_rollout(self, rewards, new_max_rew, rew_avg):
         for k in range(len(rewards)):
             if self.score_queue.full():
                 self.score_queue.get()
             self.score_queue.put(rewards[k])
 
-        rew_avg = None
-        if not self.score_queue.empty():
-            rew_avg = np.average(list(self.score_queue.queue))
-            if rew_avg > self.max_avg_reward:
-                self.max_avg_reward = rew_avg
-                print("New MAX average reward per 100/ep: ", self.max_avg_reward)
+        if new_max_rew:
+            print("New MAX average reward per 100/ep: ", self.max_avg_reward)
 
         if self.worker_rollout_counter % flags.verbose_output_interval == 0:
             print('Episode ', self.episodes, '  Iteration: ', self.worker_rollout_counter, "  Avg. reward 100/ep: ",

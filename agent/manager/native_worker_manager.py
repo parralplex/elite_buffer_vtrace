@@ -32,6 +32,7 @@ class NativeWorkerManager(WorkerManagerBase):
         self.shared_list[0] = {k: v.cpu() for k, v in current_model.state_dict().items()}
 
     def clean_up(self):
+        super(NativeWorkerManager, self).clean_up()
         for i in range(len(self.workers)):
             self.workers[i].close()
             self.workers[i].join()
