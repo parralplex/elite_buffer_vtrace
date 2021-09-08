@@ -13,14 +13,15 @@ stat_file_names = ["Scores.txt", "Train_time.txt", "Episode_steps.txt", "Loss_fi
 
 
 class Statistics(object):
-    def __init__(self, stop_event, file_save_dir_url, flags, verbose=False):
+    def __init__(self, stop_event, file_save_dir_url, flags, verbose=False, no_background_file_save=True):
         self.flags = flags
         self.stop_event = stop_event
         self.warm_up_period = 0
         self.max_reward = -sys.maxsize
         self.max_avg_reward = -sys.maxsize
         self.file_writer = SafeOrderedMultiFileWriter(self._generate_file_urls(stat_file_names, file_save_dir_url))
-        self.file_writer.start()
+        if not no_background_file_save:
+            self.file_writer.start()
         self.verbose = verbose
         self.file_save_dir_url = file_save_dir_url
 
@@ -32,6 +33,7 @@ class Statistics(object):
         self.score_queue = Queue(maxsize=self.flags.avg_buff_size)
         self.last_lr = 0
         self.dyn_batch_size = self.flags.batch_size
+        self.no_background_file_save = no_background_file_save
 
     @staticmethod
     def _generate_file_urls(names, path):
@@ -102,14 +104,22 @@ class Statistics(object):
                   " Run time:", dt.datetime.now() - self.START_TIME)
 
     def close(self):
-        self.file_writer.close()
+        if self.no_background_file_save:
+            self.file_writer.block_on_get = False
+            self.file_writer.finished = True
+            print("Writing collected stats to the text files")
+            self.file_writer.internal_writer()
+            self.file_writer.close_data_operators()
+        else:
+            self.file_writer.close()
+
         stats_file_desc = open(self.file_save_dir_url + "/training_summary.txt", "w", 1)
         stats_file_desc.write("Warm_up_period: " + str(self.warm_up_period) + '\n')
         stats_file_desc.write("Max_reach_reward: " + str(self.max_reward) + '\n')
         stats_file_desc.write("Max_avg(100)_reward: " + str(self.max_avg_reward) + '\n')
         stats_file_desc.write("Total_episodes: " + str(self.episodes) + '\n')
         stats_file_desc.write("Total_worker_rollout_iter: " + str(self.worker_rollout_counter) + '\n')
-        stats_file_desc.write("Total_learning_iter: " + str(self.process_learning_iter) + '\n')
+        stats_file_desc.write("Total_learning_iter: " + str(self.train_iter_counter) + '\n')
         stats_file_desc.write("Last_lr: " + str(self.last_lr) + '\n')
         stats_file_desc.write("Batch_size_used_without_out_of_memory_error: " + str(self.dyn_batch_size) + '\n')
         current_time = dt.datetime.now()

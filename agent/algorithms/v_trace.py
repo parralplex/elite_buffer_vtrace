@@ -40,6 +40,16 @@ def v_trace(actions, beh_logits, bootstrap_value, current_logits, current_values
 
     baseline_loss = flags.baseline_loss_coef * torch.sum((vs - current_values[:-1]) ** 2)
 
-    policy_loss = -torch.sum(target_action_log_probs * advantages_vt)
+    cross_entropy = F.nll_loss(
+        F.log_softmax(torch.flatten(current_logits[:-1], 0, 1), dim=-1),
+        target=torch.flatten(actions, 0, 1),
+        reduction="none",
+    )
+    cross_entropy = cross_entropy.view_as(advantages_vt)
+
+    # cannot used "target_action_log_probs" instead of cross_entropy because some gradients created during
+    # target_action_log_probs calculation cannot be replicated deterministically and therefore reproducibility cannot be assured
+
+    policy_loss = torch.sum(cross_entropy * advantages_vt)
 
     return baseline_loss, entropy_loss, policy_loss

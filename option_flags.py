@@ -1,7 +1,6 @@
 import argparse
-import json
 import os
-import time
+
 
 from wrappers.atari_wrappers import make_atari, wrap_pytorch, wrap_deepmind
 
@@ -15,7 +14,7 @@ parser.add_argument("--debug", type=bool, default=False)
 # TRAINING PARAMETER
 parser.add_argument('--lr', type=float, default=0.0004, help='learning rate')
 parser.add_argument('--batch_size', type=int, default=40, help='size of a single batch of data used for training')
-parser.add_argument('--r_f_steps', type=int, default=50,
+parser.add_argument('--r_f_steps', type=int, default=40,
                     help='number of environment steps per 1 rollout fragment of a worker_buf')
 parser.add_argument('--baseline_loss_coef', type=float, default=0.5)
 parser.add_argument('--entropy_loss_coef', type=float, default=0.0005)
@@ -45,22 +44,22 @@ parser.add_argument('--observation_shape', type=int, default=observation_shape, 
 parser.add_argument('--learner_thread_count', type=int, default=3, help='number of parallel learner threads')
 parser.add_argument('--worker_count', type=int, default=8, help='number of workers working in parallel')
 parser.add_argument('--envs_per_worker', type=int, default=20, help='number of environments per 1 worker')
-parser.add_argument("--multiprocessing_backend", default="python_native", choices=["ray", "python_native"], help="Type of mutiprocessing library used in app.")
+parser.add_argument("--multiprocessing_backend", default="ray", choices=["ray", "python_native"], help="Type of mutiprocessing library used in app.")
 parser.add_argument("--shared_queue_size", type=int, default=4, help="Size of the queue shared by processes to exchange data - woker_data are sent back to be processed")
 
 # END OF TRAINING CONDITIONS
 parser.add_argument('--max_episodes', type=int, default=10000000, help='total number of episodes to be executed')
 parser.add_argument('--training_max_steps', type=int, default=10000000, help='total number of training iterations')
-parser.add_argument('--max_avg_reward', type=float, default=-20.9, help='max avg(100) episode reword at which the training stops.')
+parser.add_argument('--max_avg_reward', type=float, default=20.2, help='max avg(100) episode reword at which the training stops.')
 
 # REPLAY BUFFER
 parser.add_argument('--replay_writer_cache_size', type=int, default=10, help='how many worker observations(which are to be written to replay buffer) can be stored before some of them have to discarded to save memory')
 parser.add_argument("--discarding_strategy", default="keep_latest", choices=["keep_latest", "keep_oldest", "alternating"], help="How replay writer resolves cache queue overflow")
 parser.add_argument("--use_state_compression", type=bool, default=True, help="Determines if the states in replay buffers are compressed or not.")
 
-parser.add_argument('--replay_buffer_size', type=int, default=1000, help='size of replay buffer')
+parser.add_argument('--replay_buffer_size', type=int, default=900, help='size of replay buffer')
 parser.add_argument('--elite_set_size', type=int, default=100, help='size of elite set of replay buffer')
-parser.add_argument('--replay_data_ratio', type=float, default=1, help='% number of samples used from normal part of replay buffer when creating batch')
+parser.add_argument('--replay_data_ratio', type=float, default=0.9, help='% number of samples used from normal part of replay buffer when creating batch')
 parser.add_argument('--elite_set_data_ratio', type=float, default=0.1, help='% number of samples used from elite set when creating batch')
 
 # CONSOLE OUTPUT
@@ -69,7 +68,7 @@ parser.add_argument('--verbose_worker_out_int', type=int, default=50, help='inte
 parser.add_argument('--verbose_learner_out_int', type=int, default=250, help='interval in which progress data is printed to the console')
 
 # ELITE SET
-parser.add_argument('--use_elite_set', type=bool, default=False)
+parser.add_argument('--use_elite_set', type=bool, default=True)
 parser.add_argument("--elite_reset_period", type=int, default=200, help="Elite set features recalculation period.")
 parser.add_argument('--random_search', type=bool, default=True, help="Elite set processing(on insert) starts at random index.")
 parser.add_argument('--add_rew_feature', type=bool, default=True, help="feature vecs valus are extended by the sum of rewards")

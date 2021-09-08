@@ -20,26 +20,30 @@ class SafeOrderedMultiFileWriter:
         self.queue_list[queue_index].put(data)
 
     def internal_writer(self):
+        index_list = [i for i in range(len(self.files_urls))]
         for i in range(len(self.files_urls)):
             self.file_desc_list.append(open(self.files_urls[i], "w", 1))
-        while not self.finished:
-            for i in range(len(self.files_urls)):
+        while len(index_list) > 0:
+            for i in index_list:
                 try:
-                    data = self.queue_list[i].get(timeout=2, block=self.block_on_get)
+                    data = self.queue_list[i].get(timeout=1, block=self.block_on_get)
                 except Empty:
+                    if self.finished:
+                        index_list.remove(i)
                     continue
                 for data_part in data:
-                    if self.file_desc_list[i].closed:
-                        break
                     self.file_desc_list[i].writelines(str(data_part) + '\n')
                 self.queue_list[i].task_done()
 
     def close(self):
         self.block_on_get = False
-        for i in range(len(self.files_urls)):
-            self.queue_list[i].join()
         self.finished = True
-        for i in range(len(self.files_urls)):
-            self.file_desc_list[i].close()
+        self.close_data_operators()
         if self.internal_thread is not None:
             self.internal_thread.join()
+
+    def close_data_operators(self):
+        for i in range(len(self.files_urls)):
+            self.queue_list[i].join()
+        for i in range(len(self.files_urls)):
+            self.file_desc_list[i].close()

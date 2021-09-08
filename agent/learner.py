@@ -43,7 +43,8 @@ class Learner(object):
 
         self.optimizer = Adam(self.model.parameters(), lr=self.flags.lr)
 
-        self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.9999)
+        # self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.9999)
+        self.lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, [(i * 40) + 40 for i in range(100)], gamma=0.97)
 
         self.learning_lock = threading.Lock()
         self.batch_lock = threading.Lock()

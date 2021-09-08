@@ -44,12 +44,15 @@ class ExperienceReplayTorch(object):
         self._store(index, **kwargs)
 
     def calc_index(self, **kwargs):
+        buf_size = self.flags.replay_buffer_size
+        if 'elite' in kwargs.keys() and kwargs['elite']:
+            buf_size = self.flags.elite_set_size
         if not self.filled:
-            if not self.not_used and (self.pos_pointer % self.flags.replay_buffer_size) == 0:
+            if not self.not_used and (self.pos_pointer % buf_size) == 0:
                 self.filled = True
                 self.replay_filled_event.set()
 
-        index = self.pos_pointer % self.flags.replay_buffer_size
+        index = self.pos_pointer % buf_size
 
         if self.not_used:
             self.not_used = False
