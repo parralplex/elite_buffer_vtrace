@@ -4,8 +4,8 @@ from rollout_storage.elite_set.buf_population_strategy.lim_zero_strategy import 
 
 
 class LimInfStrategy(LimZeroStrategy):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, flags):
+        super().__init__(flags)
 
     def process_dist(self, distance, index) -> bool:
         if distance == 0:

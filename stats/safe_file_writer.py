@@ -10,9 +10,11 @@ class SafeOrderedMultiFileWriter:
         for i in range(len(files_urls)):
             self.queue_list.append(Queue())
         self.finished = False
+        self.block_on_get = True
+        self.internal_thread = None
 
     def start(self):
-        Thread(name="SafeWriter", target=self.internal_writer).start()
+        self.internal_thread = Thread(name="SafeWriter", target=self.internal_writer).start()
 
     def write(self, data, queue_index=0):
         self.queue_list[queue_index].put(data)
@@ -23,7 +25,7 @@ class SafeOrderedMultiFileWriter:
         while not self.finished:
             for i in range(len(self.files_urls)):
                 try:
-                    data = self.queue_list[i].get(False)
+                    data = self.queue_list[i].get(timeout=2, block=self.block_on_get)
                 except Empty:
                     continue
                 for data_part in data:
@@ -33,8 +35,11 @@ class SafeOrderedMultiFileWriter:
                 self.queue_list[i].task_done()
 
     def close(self):
+        self.block_on_get = False
         for i in range(len(self.files_urls)):
             self.queue_list[i].join()
         self.finished = True
         for i in range(len(self.files_urls)):
             self.file_desc_list[i].close()
+        if self.internal_thread is not None:
+            self.internal_thread.join()

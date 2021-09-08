@@ -3,28 +3,28 @@ import torch
 
 from utils import decompress
 from threading import Event
-from option_flags import flags
 
 
 class ExperienceReplayTorch(object):
-    def __init__(self, batch_lock):
+    def __init__(self, batch_lock, flags):
+        self.flags = flags
         self.not_used = True
         self.filled = False
         self.pos_pointer = 0
         self.replay_filled_event = Event()
         self.batch_lock = batch_lock
 
-        if flags.use_state_compression:
+        if self.flags.use_state_compression:
             self.states = []
         else:
-            self.states = torch.zeros(flags.replay_buffer_size, flags.r_f_steps, *flags.observation_shape)
-        self.actions = torch.zeros(flags.replay_buffer_size, flags.r_f_steps)
-        self.rewards = torch.zeros(flags.replay_buffer_size, flags.r_f_steps)
-        self.logits = torch.zeros(flags.replay_buffer_size, flags.r_f_steps, flags.actions_count)
-        self.not_done = torch.zeros(flags.replay_buffer_size, flags.r_f_steps)
+            self.states = torch.zeros(self.flags.replay_buffer_size, self.flags.r_f_steps, *self.flags.observation_shape)
+        self.actions = torch.zeros(self.flags.replay_buffer_size, self.flags.r_f_steps)
+        self.rewards = torch.zeros(self.flags.replay_buffer_size, self.flags.r_f_steps)
+        self.logits = torch.zeros(self.flags.replay_buffer_size, self.flags.r_f_steps, self.flags.actions_count)
+        self.not_done = torch.zeros(self.flags.replay_buffer_size, self.flags.r_f_steps)
 
     def _store(self, index, **kwargs):
-        if flags.use_state_compression:
+        if self.flags.use_state_compression:
             if len(self.states) > index:
                 self.states[index] = kwargs['state']
             else:
@@ -45,11 +45,11 @@ class ExperienceReplayTorch(object):
 
     def calc_index(self, **kwargs):
         if not self.filled:
-            if not self.not_used and (self.pos_pointer % flags.replay_buffer_size) == 0:
+            if not self.not_used and (self.pos_pointer % self.flags.replay_buffer_size) == 0:
                 self.filled = True
                 self.replay_filled_event.set()
 
-        index = self.pos_pointer % flags.replay_buffer_size
+        index = self.pos_pointer % self.flags.replay_buffer_size
 
         if self.not_used:
             self.not_used = False
@@ -58,11 +58,11 @@ class ExperienceReplayTorch(object):
         return index
 
     def random_sample(self, batch_size):
-        indices = np.random.choice(flags.replay_buffer_size, int(batch_size * flags.replay_data_ratio))
+        indices = np.random.choice(self.flags.replay_buffer_size, int(batch_size * self.flags.replay_data_ratio))
         return self._get_batch(indices)
 
     def _get_batch(self, indices):
-        if flags.use_state_compression:
+        if self.flags.use_state_compression:
             states = []
             for k in indices:
                 states.append(decompress(self.states[k]))
@@ -80,8 +80,8 @@ class ExperienceReplayTorch(object):
         indices = []
         for i in range(self.pos_pointer, self.pos_pointer - batch_size, -1):
             if i < 0:
-                indices.append(i + flags.replay_buffer_size)
+                indices.append(i + self.flags.replay_buffer_size)
             else:
-                indices.append(i % flags.replay_buffer_size)
+                indices.append(i % self.flags.replay_buffer_size)
         return self._get_batch(indices)
 

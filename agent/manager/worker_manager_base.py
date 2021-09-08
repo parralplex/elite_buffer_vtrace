@@ -1,16 +1,15 @@
 import abc
 from utils import compress
 
-from option_flags import flags
-
 
 class WorkerManagerBase(metaclass=abc.ABCMeta):
-    def __init__(self, stop_event, training_event, replay_writer, replay_buffers, stats):
+    def __init__(self, stop_event, training_event, replay_writer, replay_buffers, stats, flags):
         self.replay_writer = replay_writer
         self.replay_buffers = replay_buffers
         self.stop_event = stop_event
         self.stats = stats
         self.training_event = training_event
+        self.flags = flags
 
     @classmethod
     def __subclasshook__(cls, subclass):
@@ -24,7 +23,9 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
     def manage_workers(self, post_processing_func=None, *args):
         while True:
             if self.stop_event.is_set():
+                print("MANAGER CLEANUP")
                 self.clean_up()
+                print("MANAGER ENDING")
                 break
             self.pre_processing()
             workers_data = self.plan_and_execute_workers()
@@ -32,7 +33,7 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
                 self.store_worker_data(workers_data[i][0])
                 _, _, rewards, ep_steps = workers_data[i]
                 self.stats.process_worker_rollout(rewards, ep_steps)
-            if flags.reproducible:
+            if self.flags.reproducible:
                 post_processing_func(args[0])
 
     @abc.abstractmethod
@@ -40,11 +41,11 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     def store_worker_data(self, worker_data):
-        if flags.reproducible:
+        if self.flags.reproducible:
             for i in range(len(worker_data)):
                 for p in range(len(self.replay_buffers)):
                     state = worker_data[i].states
-                    if flags.use_state_compression:
+                    if self.flags.use_state_compression:
                         state = compress(state)
                     self.replay_buffers[p].store_next(state=state,
                                                       action=worker_data[i].actions,
@@ -52,9 +53,9 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
                                                       logits=worker_data[i].logits,
                                                       not_done=worker_data[i].not_done,
                                                       feature_vec=worker_data[i].feature_vec,
-                                                      random_search=flags.random_search,
-                                                      add_rew_feature=flags.add_rew_feature,
-                                                      p=flags.p)
+                                                      random_search=self.flags.random_search,
+                                                      add_rew_feature=self.flags.add_rew_feature,
+                                                      p=self.flags.p)
         else:
             self.replay_writer.write(worker_data)
 

@@ -4,10 +4,9 @@ V-trace algorithm based on https://arxiv.org/abs/1802.01561
 """
 import torch
 import torch.nn.functional as F
-from option_flags import flags
 
 
-def v_trace(actions, beh_logits, bootstrap_value, current_logits, current_values, not_done, rewards, device):
+def v_trace(actions, beh_logits, bootstrap_value, current_logits, current_values, not_done, rewards, device, flags, batch_size):
     target_log_policy = F.log_softmax(current_logits[:-1], dim=-1)
     target_action_log_probs = target_log_policy.gather(2, actions.unsqueeze(-1)).squeeze(-1)
 
@@ -25,7 +24,7 @@ def v_trace(actions, beh_logits, bootstrap_value, current_logits, current_values
 
         deltas = rhos * (rewards + discounts * values_t_plus_1 - current_values[:-1])
 
-        vs = torch.zeros((flags.r_f_steps, flags.batch_size)).to(device)
+        vs = torch.zeros((flags.r_f_steps, batch_size)).to(device)
 
         vs_minus_v_xs = torch.zeros_like(bootstrap_value)
         for t in reversed(range(flags.r_f_steps)):

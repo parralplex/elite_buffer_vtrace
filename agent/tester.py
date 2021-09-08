@@ -2,20 +2,27 @@ import gym
 import torch
 import torch.nn.functional as F
 from model.network import ModelNetwork
-from option_flags import flags
+
+
+class UnSupportedFormatError(Exception):
+    pass
 
 
 class Tester(object):
-    def __init__(self, test_ep_count, model_save_uri):
+    def __init__(self, test_ep_count, model_save_uri, flags):
+        self.flags = flags
         self.test_ep_count = test_ep_count
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             print("Tester is using CUDA")
         else:
             print("CUDA IS NOT AVAILABLE")
-        self.env = gym.make(flags.env)
+        self.env = gym.make(self.flags.env)
         self.model = ModelNetwork(self.env.action_space.n).to(self.device).eval()
-        self.model.load_state_dict(torch.load(model_save_uri)['model_state_dict'])
+        loaded_dict = torch.load(model_save_uri)
+        if loaded_dict is not dict or 'model_state_dict' not in loaded_dict.keys():
+            raise UnSupportedFormatError("Format of the loaded model to test is not supported")
+        self.model.load_state_dict(loaded_dict['model_state_dict'])
         self.ep_counter = 0
 
     def test(self, render=False):

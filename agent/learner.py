@@ -1,13 +1,13 @@
+import time
+
 import torch
 import threading
 import os
 import torch.backends.cudnn
-import datetime as dt
 import json
-
+import datetime as dt
 from agent.algorithms.v_trace import v_trace
 from agent.manager.native_worker_manager import NativeWorkerManager
-from agent.manager.ray_worker_manager import RayWorkerManager
 from rollout_storage.elite_set.buf_population_strategy.brute_force_strategy import BruteForceStrategy
 from rollout_storage.elite_set.buf_population_strategy.lim_inf_strategy import LimInfStrategy
 from rollout_storage.elite_set.buf_population_strategy.lim_zero_strategy import LimZeroStrategy
@@ -21,28 +21,27 @@ from rollout_storage.writer_queue.replay_buffer_writer import ReplayWriterQueue
 from torch.optim import Adam
 from model.network import ModelNetwork
 from stats.stats import Statistics
-from option_flags import flags, set_flags
 
 
 class Learner(object):
-    def __init__(self):
-        self.run_ID = int(dt.datetime.timestamp(dt.datetime.now()))
-        self.file_save_dir_url = "results/" + flags.env + "_" + str(self.run_ID)
+    def __init__(self, flags):
+        self.run_id = int(dt.datetime.timestamp(dt.datetime.now()))
+        self.flags = flags
+        self.file_save_dir_url = "results/" + self.flags.env + "_" + str(self.run_id)
         os.makedirs(self.file_save_dir_url)
 
-        self.stats = Statistics(self.file_save_dir_url, True)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             print("Learner is using CUDA")
         else:
             print("CUDA IS NOT AVAILABLE")
-        self.model = ModelNetwork(flags.actions_count).to(self.device)
-        self.feature_reset_model = ModelNetwork(flags.actions_count).eval()
+        self.model = ModelNetwork(self.flags.actions_count).to(self.device)
+        self.feature_reset_model = ModelNetwork(self.flags.actions_count).eval()
 
-        if flags.op_mode == "train_w_load":
-            self.model.load_state_dict(torch.load(flags.load_model_uri)["model_state_dict"])
+        if self.flags.op_mode == "train_w_load":
+            self.model.load_state_dict(torch.load(self.flags.load_model_uri)["model_state_dict"])
 
-        self.optimizer = Adam(self.model.parameters(), lr=flags.lr)
+        self.optimizer = Adam(self.model.parameters(), lr=self.flags.lr)
 
         self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.9999)
 
@@ -51,34 +50,43 @@ class Learner(object):
         self.stop_event = threading.Event()
         self.training_event = threading.Event()
 
+        self.stats = Statistics(self.stop_event, self.file_save_dir_url, self.flags, True)
+
         self.training_iteration = 0
 
-        self.replay_buffers = [ExperienceReplayTorch(self.batch_lock)]
-        if flags.use_elite_set:
+        self.replay_buffers = [ExperienceReplayTorch(self.batch_lock, self.flags)]
+        if self.flags.use_elite_set:
             elite_pop_strategy = None
-            if flags.elite_pop_strategy == "lim_zero":
-                elite_pop_strategy = LimZeroStrategy()
-            elif flags.elite_pop_strategy == "lim_inf":
-                elite_pop_strategy = LimInfStrategy()
-            elif flags.elite_pop_strategy == "brute_force":
-                elite_pop_strategy = BruteForceStrategy()
-            self.replay_buffers.append(EliteSetReplay(self.batch_lock, (self.model.get_flatten_layer_output_size(),), elite_pop_strategy))
+            if self.flags.elite_pop_strategy == "lim_zero":
+                elite_pop_strategy = LimZeroStrategy(self.flags)
+            elif self.flags.elite_pop_strategy == "lim_inf":
+                elite_pop_strategy = LimInfStrategy(self.flags)
+            elif self.flags.elite_pop_strategy == "brute_force":
+                elite_pop_strategy = BruteForceStrategy(self.flags)
+            self.replay_buffers.append(EliteSetReplay(self.batch_lock, (self.model.get_flatten_layer_output_size(),), elite_pop_strategy, self.flags))
 
         replay_writer_strategy = None
-        if flags.discarding_strategy == "keep_latest":
+        if self.flags.discarding_strategy == "keep_latest":
             replay_writer_strategy = KeepLatestStrategy()
-        elif flags.discarding_strategy == "keep_oldest":
+        elif self.flags.discarding_strategy == "keep_oldest":
             replay_writer_strategy = KeepOldestStrategy()
-        elif flags.discarding_strategy == "alternating":
+        elif self.flags.discarding_strategy == "alternating":
             replay_writer_strategy = AlternatingStrategy()
-        self.replay_writer = ReplayWriterQueue(self.replay_buffers, queue_size=flags.replay_writer_cache_size,
-                                               fill_in_strategy=replay_writer_strategy)
+        self.replay_writer = ReplayWriterQueue(self.replay_buffers, queue_size=self.flags.replay_writer_cache_size,
+                                               fill_in_strategy=replay_writer_strategy, flags=self.flags)
         self.replay_writer.start()
 
-        if flags.multiprocessing_backend == "ray":
-            self.worker_manager = RayWorkerManager(self.stop_event, self.replay_writer, self.replay_buffers, self.training_event, self.model, self.stats)
-        elif flags.multiprocessing_backend == "python_native":
-            self.worker_manager = NativeWorkerManager(self.stop_event, self.replay_writer, self.replay_buffers, self.model, self.stats)
+        if self.flags.multiprocessing_backend == "ray":
+            from agent.manager.ray_worker_manager import RayWorkerManager # local import so ray is not imported when using python_native multiprocessing
+            self.worker_manager = RayWorkerManager(self.stop_event, self.training_event, self.replay_writer, self.replay_buffers, self.model, self.stats, self.flags, False)
+        elif self.flags.multiprocessing_backend == "python_native":
+            if self.flags.reproducible:
+                self.replay_writer.close()
+                self.stats.close()
+                raise NotImplementedError("Synchronized version on python_native backend has not been implemented yet.")
+            self.worker_manager = NativeWorkerManager(self.stop_event, self.training_event, self.replay_writer, self.replay_buffers, self.model, self.stats, self.flags, False)
+
+        self.batch_size = self.flags.batch_size
 
     def start_async(self):
         threads = []
@@ -86,7 +94,7 @@ class Learner(object):
         thread.start()
         threads.append(thread)
 
-        for i in range(flags.learner_thread_count):
+        for i in range(self.flags.learner_thread_count):
             thread = threading.Thread(target=self.learning, name="learning_thread-%d" % i)
             thread.start()
             threads.append(thread)
@@ -94,13 +102,19 @@ class Learner(object):
         for thread in threads:
             thread.join()
 
+        print("1")
         self._save_current_model_state()
+        print("2")
+        self.replay_writer.close()
+        print("3")
         self.stats.close()
+        return 0
 
     def start_sync(self):
         self.worker_manager.manage_workers(self._learning_iteration, True)
         self._save_current_model_state()
         self.stats.close()
+        return 0
 
     def learning(self):
         for p in range(len(self.replay_buffers)):
@@ -108,8 +122,9 @@ class Learner(object):
 
         self.training_event.set()
         self.stats.mark_warm_up_period()
-        while self.training_iteration < flags.training_max_steps:
+        while self.training_iteration < self.flags.training_max_steps:
             if self.stop_event.is_set():
+                print("LEARNER ENDING")
                 break
             self._learning_iteration()
         self.stop_event.set()
@@ -121,25 +136,40 @@ class Learner(object):
                     return
             if not self.training_event.is_set():
                 self.training_event.set()
-            if self.training_iteration >= flags.training_max_steps:
+            if self.training_iteration >= self.flags.training_max_steps:
                 self.stop_event.set()
                 return
+        try:
+            actions, beh_logits, not_done, rewards, states = self._prepare_batch()
 
-        actions, beh_logits, not_done, rewards, states = self._prepare_batch()
+            with self.learning_lock:
+                self.training_iteration += 1
+                bootstrap_value, current_logits, current_values = self._foward_pass(states)
 
-        with self.learning_lock:
-            self.training_iteration += 1
-            bootstrap_value, current_logits, current_values = self._foward_pass(states)
+                baseline_loss, entropy_loss, policy_loss = v_trace(actions, beh_logits, bootstrap_value,
+                                                                   current_logits, current_values, not_done, rewards, self.device, self.flags, self.batch_size)
 
-            baseline_loss, entropy_loss, policy_loss = v_trace(actions, beh_logits, bootstrap_value,
-                                                               current_logits, current_values, not_done, rewards, self.device)
-
-            self._backprop(policy_loss, baseline_loss, entropy_loss)
+                self._backprop(policy_loss, baseline_loss, entropy_loss)
+        except RuntimeError as exp:
+            if 'out of memory' in str(exp):
+                print('WARNING: ran out of memory, trying to lower the batch_size')
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        del p.grad
+                torch.cuda.empty_cache()
+                time.sleep(5)
+                self.batch_size -= 2
+                if self.batch_size <= 0:
+                    raise exp
+                self.stats.change_batch_size(self.batch_size)
+                return
+            else:
+                raise exp
 
         self.worker_manager.update_model_data(self.model)
-        if flags.use_elite_set:
+        if self.flags.use_elite_set:
             self._update_elite_features()
-        if self.training_iteration % flags.save_model_period == 0:
+        if self.training_iteration % self.flags.save_model_period == 0:
             self._save_current_model_state()
 
     def _foward_pass(self, states):
@@ -154,18 +184,18 @@ class Learner(object):
         loss = policy_loss + baseline_loss + entropy_loss
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), flags.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.flags.max_grad_norm)
         self.optimizer.step()
         self.lr_scheduler.step()
         self.stats.process_learning_iter(policy_loss.item(), baseline_loss.item(), entropy_loss.item(), self.lr_scheduler.get_last_lr()[0])
 
     def _prepare_batch(self):
         states, actions, rewards, beh_logits, not_done = self.replay_buffers[0].random_sample(
-            flags.batch_size)
+            self.batch_size)
 
         for i in range(1, len(self.replay_buffers)):
             states_n, actions_n, rewards_n, beh_logits_n, not_done_n = self.replay_buffers[i].random_sample(
-                flags.batch_size)
+                self.batch_size)
             states = torch.cat((states, states_n), 0)
             actions = torch.cat((actions, actions_n), 0)
             rewards = torch.cat((rewards, rewards_n), 0)
@@ -179,7 +209,7 @@ class Learner(object):
         return actions, beh_logits, not_done, rewards, states
 
     def _update_elite_features(self):
-        if self.training_iteration % flags.elite_reset_period == 0:
+        if self.training_iteration % self.flags.elite_reset_period == 0:
             with self.batch_lock:
                 print("recalculating features")
                 prior_states = self.replay_buffers[1].get_prior_buf_states()
@@ -206,11 +236,11 @@ class Learner(object):
         torch.save({"model_state_dict": self.model.state_dict(),
                     "optimizer_state_dict": self.optimizer.state_dict(),
                     "scheduler_state_dict": self.lr_scheduler.state_dict(),
-                    "flags": vars(flags),
+                    "flags": vars(self.flags),
                     },
                    self.file_save_dir_url + '/regular_model_save_.pt')
         with open(self.file_save_dir_url + '/options_flags.json', 'w') as file:
-            json.dump(flags.__dict__, file, indent=2)
+            json.dump(self.flags.__dict__, file, indent=2)
 
     def _load_model_state(self, url):
         # TODO check if url is valid
@@ -218,4 +248,4 @@ class Learner(object):
         self.model.load_state_dict(state_dict["model_state_dict"])
         self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
         self.lr_scheduler.load_state_dict(state_dict["scheduler_state_dict"])
-        set_flags(state_dict["flags"])
+        self.flags = state_dict["flags"]

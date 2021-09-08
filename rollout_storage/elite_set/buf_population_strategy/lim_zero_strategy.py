@@ -7,10 +7,10 @@ from option_flags import flags
 
 
 class LimZeroStrategy(EliteSetInsertStrategy):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, flags):
+        super().__init__(flags)
         self.min_sum_reward = -sys.maxsize
-        self.rew_sum = torch.zeros(flags.elite_set_size)
+        self.rew_sum = torch.zeros(self.flags.elite_set_size)
         self.entry_idx = 0
         self.entry_distance = sys.maxsize
         self.update_entry = True

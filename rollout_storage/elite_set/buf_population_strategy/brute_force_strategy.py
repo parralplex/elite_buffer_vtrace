@@ -7,8 +7,8 @@ from option_flags import flags
 
 
 class BruteForceStrategy(EliteSetInsertStrategy):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, flags):
+        super().__init__(flags)
         self.buf_distances_sum = 0
         self.buf_distances = []
 
@@ -34,10 +34,10 @@ class BruteForceStrategy(EliteSetInsertStrategy):
 
         offset = 0
         if kwargs["random_search"]:
-            offset = random.randint(0, flags.elite_set_size - 1)
-        for i in range(flags.elite_set_size):
+            offset = random.randint(0, self.flags.elite_set_size - 1)
+        for i in range(self.flags.elite_set_size):
             if kwargs["random_search"]:
-                index = (i + offset) % flags.elite_set_size
+                index = (i + offset) % self.flags.elite_set_size
             else:
                 index = i
             new_buff_dis_sum = (self.buf_distances_sum - self.buf_distances[index]) + self.new_tr_dis_sum - \

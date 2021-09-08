@@ -10,13 +10,13 @@ from wrappers import atari_wrappers
 from rollout_storage.worker_buf.torch_worker_buffer import TorchWorkerBuffer
 from queue import Queue
 from model.network import ModelNetwork
-from option_flags import flags
 
 
 class RolloutWorker(object):
-    def __init__(self, id, verbose=False):
+    def __init__(self, id, flags, verbose=False):
         self.device = torch.device("cpu")
         self.verbose = verbose
+        self.flags = flags
         if flags.reproducible:
             torch.cuda.manual_seed(flags.seed)
             torch.cuda.manual_seed_all(flags.seed)
@@ -27,7 +27,7 @@ class RolloutWorker(object):
         self.model = ModelNetwork(flags.actions_count).eval()
 
         self.feature_vec_dim = self.model.get_flatten_layer_output_size()
-        self.actor_id = id
+        self.worker_id = id
 
         self.episode_rewards = Queue(maxsize=flags.avg_buff_size)
         self.max_avg_reward = -sys.maxsize
@@ -52,8 +52,7 @@ class RolloutWorker(object):
 
             self.workers_envs.append(env)
             self.workers_buffers.append(
-                TorchWorkerBuffer(flags.r_f_steps, flags.observation_shape, flags.actions_count,
-                                  (self.feature_vec_dim,)))
+                TorchWorkerBuffer((self.feature_vec_dim,), flags))
             init_state = torch.from_numpy(self.workers_envs[i].reset()).float()
             self.observations.append(init_state)
         self.observations = torch.stack(self.observations)
@@ -74,7 +73,7 @@ class RolloutWorker(object):
                 self.workers_buffers[i].reset()
                 self.workers_buffers[i].states[0] = self.observations[i]
 
-            for step in range(flags.r_f_steps):
+            for step in range(self.flags.r_f_steps):
                 with torch.no_grad():
                     logits, _, feature_vecs = self.model(self.observations)
 
@@ -112,10 +111,10 @@ class RolloutWorker(object):
                 avg_rew = np.average(list(self.episode_rewards.queue))
                 if avg_rew > self.max_avg_reward:
                     self.max_avg_reward = avg_rew
-                    print("worker_buf: " + str(self.actor_id) + " New MAX avg(100) reward: ", self.max_avg_reward)
+                    print("Worker: " + str(self.worker_id) + " New MAX avg(100)rew: ", "{:.2f}".format(self.max_avg_reward))
 
-                if self.iteration_counter % flags.verbose_output_interval == 0:
-                    print('worker_buf ' + str(self.actor_id) + '  WorkerIteration: ', self.iteration_counter, "  Avg. reward 100/ep: ",
-                              avg_rew)
+                if self.iteration_counter % self.flags.verbose_worker_out_int == 0:
+                    print('Worker: ' + str(self.worker_id) + '  WorkerIteration: ', self.iteration_counter, " Avg(100)rew: ",
+                              "{:.2f}".format(avg_rew))
 
-            return self.workers_buffers, self.actor_id, iteration_rewards, iteration_ep_steps
+            return self.workers_buffers, self.worker_id, iteration_rewards, iteration_ep_steps

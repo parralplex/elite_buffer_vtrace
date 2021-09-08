@@ -6,7 +6,6 @@ from queue import Queue
 
 from stats.data_plotter import set_global_chart_settings, create_chart
 from stats.safe_file_writer import SafeOrderedMultiFileWriter
-from option_flags import flags
 
 
 stat_file_names = ["Scores.txt", "Train_time.txt", "Episode_steps.txt", "Loss_file.txt",
@@ -14,7 +13,8 @@ stat_file_names = ["Scores.txt", "Train_time.txt", "Episode_steps.txt", "Loss_fi
 
 
 class Statistics(object):
-    def __init__(self, stop_event, file_save_dir_url, verbose=False):
+    def __init__(self, stop_event, file_save_dir_url, flags, verbose=False):
+        self.flags = flags
         self.stop_event = stop_event
         self.warm_up_period = 0
         self.max_reward = -sys.maxsize
@@ -29,14 +29,15 @@ class Statistics(object):
         self.WARM_UP_TIME = dt.datetime.now()
         self.worker_rollout_counter = 0
         self.train_iter_counter = 0
-        self.score_queue = Queue(maxsize=flags.avg_buff_size)
+        self.score_queue = Queue(maxsize=self.flags.avg_buff_size)
         self.last_lr = 0
+        self.dyn_batch_size = self.flags.batch_size
 
     @staticmethod
     def _generate_file_urls(names, path):
-        urls = names
+        urls = []
         for i in range(len(stat_file_names)):
-            urls[i] = path + "/" + names[i]
+            urls.append(path + "/" + names[i])
         return urls
 
     def mark_warm_up_period(self):
@@ -64,14 +65,14 @@ class Statistics(object):
             if rew_avg > self.max_avg_reward:
                 self.max_avg_reward = rew_avg
                 new_max_rew = True
-                if self.max_avg_reward >= flags.max_avg_reward:
+                if self.max_avg_reward >= self.flags.max_avg_reward:
                     self.stop_event.set()
 
         if len(rewards) > 0:
             self.file_writer.write([str(len(rewards)) + ',' + str(dt.datetime.now() - self.START_TIME) + ',' + str((dt.datetime.now() - self.START_TIME).total_seconds()) + "," + str(self.train_iter_counter)], 1)
         if self.verbose:
             self._verbose_process_rollout(rewards, new_max_rew, rew_avg)
-        if self.episodes >= flags.max_episodes:
+        if self.episodes >= self.flags.max_episodes:
             self.stop_event.set()
 
     def _verbose_process_rollout(self, rewards, new_max_rew, rew_avg):
@@ -81,25 +82,28 @@ class Statistics(object):
             self.score_queue.put(rewards[k])
 
         if new_max_rew:
-            print("New MAX average reward per 100/ep: ", self.max_avg_reward)
+            print("New MAX avg rew per 100/ep: ", "{:.2f}".format(self.max_avg_reward))
 
-        if self.worker_rollout_counter % flags.verbose_output_interval == 0:
-            print('Episode ', self.episodes, '  Iteration: ', self.worker_rollout_counter, "  Avg. reward 100/ep: ",
-                  rew_avg, " Training iterations: ", self.train_iter_counter)
+        if self.worker_rollout_counter % self.flags.verbose_worker_out_int == 0:
+            print('Episode ', self.episodes, '  Iteration: ', self.worker_rollout_counter, "  Avg(100)rew: ",
+                  "{:.2f}".format(rew_avg), " Train iter: ", self.train_iter_counter)
+
+    def change_batch_size(self, new_batch_size):
+        self.dyn_batch_size = new_batch_size
 
     def process_learning_iter(self, policy_loss, baseline_loss, entropy_loss, lr):
         self.train_iter_counter += 1
         self.last_lr = lr
         self.file_writer.write([str(policy_loss) + ',' + str(baseline_loss) + ',' + str(entropy_loss)], 3)
-        self.file_writer.write([str(lr)])
+        self.file_writer.write([str(lr)], 4)
 
-        if self.verbose and self.train_iter_counter % flags.verbose_output_interval == 0:
-            print("Training iterations: ", self.train_iter_counter, " Lr:", lr, " Total_loss:", policy_loss+baseline_loss+entropy_loss,
-                  " Policy_loss:", policy_loss, " Baseline_loss:", baseline_loss, " Entropy_loss:", entropy_loss)
+        if self.verbose and self.train_iter_counter % self.flags.verbose_learner_out_int == 0:
+            print("Train iter: ", self.train_iter_counter, " Lr:", "{:.9f}".format(lr), " Total_loss:", "{:.4f}".format(policy_loss+baseline_loss+entropy_loss),
+                  " Run time:", dt.datetime.now() - self.START_TIME)
 
     def close(self):
         self.file_writer.close()
-        stats_file_desc = open(self.file_save_dir_url, "w", 1)
+        stats_file_desc = open(self.file_save_dir_url + "/training_summary.txt", "w", 1)
         stats_file_desc.write("Warm_up_period: " + str(self.warm_up_period) + '\n')
         stats_file_desc.write("Max_reach_reward: " + str(self.max_reward) + '\n')
         stats_file_desc.write("Max_avg(100)_reward: " + str(self.max_avg_reward) + '\n')
@@ -107,6 +111,7 @@ class Statistics(object):
         stats_file_desc.write("Total_worker_rollout_iter: " + str(self.worker_rollout_counter) + '\n')
         stats_file_desc.write("Total_learning_iter: " + str(self.process_learning_iter) + '\n')
         stats_file_desc.write("Last_lr: " + str(self.last_lr) + '\n')
+        stats_file_desc.write("Batch_size_used_without_out_of_memory_error: " + str(self.dyn_batch_size) + '\n')
         current_time = dt.datetime.now()
         stats_file_desc.write("Total_execution_time: " + str(current_time - self.START_TIME) + '\n')
         if self.warm_up_period > 0:
@@ -114,6 +119,7 @@ class Statistics(object):
             stats_file_desc.write("Total_warm_up_time: " + str(self.WARM_UP_TIME - self.START_TIME) + '\n')
         stats_file_desc.flush()
         stats_file_desc.close()
+        self._create_charts()
 
     def _create_charts(self):
         avg_buf_size = self.episodes * 0.001
