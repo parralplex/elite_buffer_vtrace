@@ -51,6 +51,7 @@ class EliteSetReplay(ExperienceReplayTorch):
 
     def set_feature_vecs_prior(self, feature_vecs):
         self.feature_vecs = feature_vecs
+        self.insert_strategy.recalculate_dist(self.feature_vecs)
 
     def random_sample(self, batch_size):
         indices = np.random.choice(self.flags.elite_set_size, int(batch_size * self.flags.elite_set_data_ratio))

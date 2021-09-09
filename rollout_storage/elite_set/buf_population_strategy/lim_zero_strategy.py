@@ -7,6 +7,7 @@ from option_flags import flags
 
 
 class LimZeroStrategy(EliteSetInsertStrategy):
+
     def __init__(self, flags):
         super().__init__(flags)
         self.min_sum_reward = -sys.maxsize
@@ -59,4 +60,7 @@ class LimZeroStrategy(EliteSetInsertStrategy):
         if entry_rew < self.min_sum_reward:
             self.min_sum_reward = entry_rew
         self.rew_sum[index] = entry_rew
+
+    def recalculate_dist(self, feature_vecs):
+        pass
             

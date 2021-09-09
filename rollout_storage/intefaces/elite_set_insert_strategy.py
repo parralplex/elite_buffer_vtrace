@@ -12,7 +12,9 @@ class EliteSetInsertStrategy(metaclass=abc.ABCMeta):
         return (hasattr(subclass, 'process_dist') and
                 callable(subclass.process_dist) and
                 hasattr(subclass, 'on_insert_before_filled') and
-                callable(subclass.on_insert_before_filled))
+                callable(subclass.on_insert_before_filled) and
+                hasattr(subclass, 'recalculate_dist') and
+                callable(subclass.recalculate_dist))
 
     def calculate_best_index_pos(self, feature_vecs, new_feature_vec, new_reward, **kwargs):
         offset = 0
@@ -33,4 +35,8 @@ class EliteSetInsertStrategy(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def on_insert_before_filled(self, index, **kwargs):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def recalculate_dist(self, feature_vecs):
         raise NotImplementedError

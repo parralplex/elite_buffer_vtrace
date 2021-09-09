@@ -23,9 +23,7 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
     def manage_workers(self, post_processing_func=None, *args):
         while True:
             if self.stop_event.is_set():
-                print("MANAGER CLEANUP")
                 self.clean_up()
-                print("MANAGER ENDING")
                 break
             self.pre_processing()
             workers_data = self.plan_and_execute_workers()

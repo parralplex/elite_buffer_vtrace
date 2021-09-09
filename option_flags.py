@@ -13,8 +13,8 @@ parser.add_argument("--debug", type=bool, default=False)
 
 # TRAINING PARAMETER
 parser.add_argument('--lr', type=float, default=0.0004, help='learning rate')
-parser.add_argument('--batch_size', type=int, default=40, help='size of a single batch of data used for training')
-parser.add_argument('--r_f_steps', type=int, default=40,
+parser.add_argument('--batch_size', type=int, default=100, help='size of a single batch of data used for training')
+parser.add_argument('--r_f_steps', type=int, default=20,
                     help='number of environment steps per 1 rollout fragment of a worker_buf')
 parser.add_argument('--baseline_loss_coef', type=float, default=0.5)
 parser.add_argument('--entropy_loss_coef', type=float, default=0.0005)
@@ -57,10 +57,10 @@ parser.add_argument('--replay_writer_cache_size', type=int, default=10, help='ho
 parser.add_argument("--discarding_strategy", default="keep_latest", choices=["keep_latest", "keep_oldest", "alternating"], help="How replay writer resolves cache queue overflow")
 parser.add_argument("--use_state_compression", type=bool, default=True, help="Determines if the states in replay buffers are compressed or not.")
 
-parser.add_argument('--replay_buffer_size', type=int, default=900, help='size of replay buffer')
-parser.add_argument('--elite_set_size', type=int, default=100, help='size of elite set of replay buffer')
-parser.add_argument('--replay_data_ratio', type=float, default=0.9, help='% number of samples used from normal part of replay buffer when creating batch')
-parser.add_argument('--elite_set_data_ratio', type=float, default=0.1, help='% number of samples used from elite set when creating batch')
+parser.add_argument('--replay_buffer_size', type=int, default=1000, help='size of replay buffer')
+parser.add_argument('--elite_set_size', type=int, default=0, help='size of elite set of replay buffer')
+parser.add_argument('--replay_data_ratio', type=float, default=1, help='% number of samples used from normal part of replay buffer when creating batch')
+parser.add_argument('--elite_set_data_ratio', type=float, default=0, help='% number of samples used from elite set when creating batch')
 
 # CONSOLE OUTPUT
 parser.add_argument('--avg_buff_size', type=int, default=100, help='number of data used to calculate average score')
@@ -68,7 +68,7 @@ parser.add_argument('--verbose_worker_out_int', type=int, default=50, help='inte
 parser.add_argument('--verbose_learner_out_int', type=int, default=250, help='interval in which progress data is printed to the console')
 
 # ELITE SET
-parser.add_argument('--use_elite_set', type=bool, default=True)
+parser.add_argument('--use_elite_set', type=bool, default=False)
 parser.add_argument("--elite_reset_period", type=int, default=200, help="Elite set features recalculation period.")
 parser.add_argument('--random_search', type=bool, default=True, help="Elite set processing(on insert) starts at random index.")
 parser.add_argument('--add_rew_feature', type=bool, default=True, help="feature vecs valus are extended by the sum of rewards")
@@ -94,6 +94,7 @@ def change_args(**kwargs):
         raise KeyError("rnd_index_chance flag cannot be changed on run_time, because it is part of the decorator which cannot be reinitialized")
     parser.set_defaults(**kwargs)
     flags = parser.parse_args()
+    return flags
 
 
 

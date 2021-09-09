@@ -63,3 +63,10 @@ class BruteForceStrategy(EliteSetInsertStrategy):
             self.buf_distances_sum += distance
             self.buf_distances[i] += distance
             self.buf_distances[index] += distance
+
+    def recalculate_dist(self, feature_vecs):
+        self.buf_distances_sum = 0
+        self.buf_distances = []
+
+        for i in range(len(feature_vecs)):
+            self.on_insert_before_filled(i, feature_vecs=feature_vecs, feature_vec=feature_vecs[i], p=self.flags.p)

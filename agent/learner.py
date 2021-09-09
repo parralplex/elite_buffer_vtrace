@@ -2,10 +2,8 @@ import time
 
 import torch
 import threading
-import os
 import torch.backends.cudnn
 import json
-import datetime as dt
 from agent.algorithms.v_trace import v_trace
 from agent.manager.native_worker_manager import NativeWorkerManager
 from rollout_storage.elite_set.buf_population_strategy.brute_force_strategy import BruteForceStrategy
@@ -20,38 +18,48 @@ from rollout_storage.writer_queue.keep_oldest_strategy import KeepOldestStrategy
 from rollout_storage.writer_queue.replay_buffer_writer import ReplayWriterQueue
 from torch.optim import Adam
 from model.network import ModelNetwork
+from scheduler.multi_step_lr import MultiStepLRStr
 from stats.stats import Statistics
+from utils import logger
+
+
+class MissingMethod(Exception):
+    pass
 
 
 class Learner(object):
-    def __init__(self, flags):
-        self.run_id = int(dt.datetime.timestamp(dt.datetime.now()))
+    def __init__(self, flags, run_id):
+        self.run_id = run_id
         self.flags = flags
         self.file_save_dir_url = "results/" + self.flags.env + "_" + str(self.run_id)
-        os.makedirs(self.file_save_dir_url)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
-            print("Learner is using CUDA")
+            logger.info("Learner is using CUDA - GPU execution")
         else:
-            print("CUDA IS NOT AVAILABLE")
+            logger.info("CUDA not available - CPU execution")
         self.model = ModelNetwork(self.flags.actions_count).to(self.device)
         self.feature_reset_model = ModelNetwork(self.flags.actions_count).eval()
 
         if self.flags.op_mode == "train_w_load":
             self.model.load_state_dict(torch.load(self.flags.load_model_uri)["model_state_dict"])
+            logger.info("Model state successfully loaded from file save")
 
         self.optimizer = Adam(self.model.parameters(), lr=self.flags.lr)
+        if not hasattr(self.optimizer, '__str__'):
+            raise MissingMethod("Optimizer doesnt have __str__ method implemented, which is required")
 
         # self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.9999)
-        self.lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, [(i * 40) + 40 for i in range(100)], gamma=0.97)
+        self.lr_scheduler = MultiStepLRStr(self.optimizer, [(i * 40) + 40 for i in range(100)], gamma=0.97)
+        if not hasattr(self.lr_scheduler, '__str__'):
+            raise MissingMethod("Scheduler doesnt have __str__ method implemented, which is required")
 
         self.learning_lock = threading.Lock()
         self.batch_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.training_event = threading.Event()
 
-        self.stats = Statistics(self.stop_event, self.file_save_dir_url, self.flags, True)
+        self.stats = Statistics(self.stop_event, self.file_save_dir_url, self.flags, str(self.optimizer), str(self.lr_scheduler), True, self.flags.background_save)
 
         self.training_iteration = 0
 
@@ -103,17 +111,17 @@ class Learner(object):
         for thread in threads:
             thread.join()
 
-        print("1")
+        logger.info("Training has ended. Beginning to clean up resources and process collected data.")
         self._save_current_model_state()
-        print("2")
         self.replay_writer.close()
-        print("3")
         self.stats.close()
         return 0
 
     def start_sync(self):
         self.worker_manager.manage_workers(self._learning_iteration, True)
+        logger.info("Training has ended. Beginning to clean up resources and process collected data.")
         self._save_current_model_state()
+        self.replay_writer.close()
         self.stats.close()
         return 0
 
@@ -125,7 +133,6 @@ class Learner(object):
         self.stats.mark_warm_up_period()
         while self.training_iteration < self.flags.training_max_steps:
             if self.stop_event.is_set():
-                print("LEARNER ENDING")
                 break
             self._learning_iteration()
         self.stop_event.set()
@@ -153,7 +160,7 @@ class Learner(object):
                 self._backprop(policy_loss, baseline_loss, entropy_loss)
         except RuntimeError as exp:
             if 'out of memory' in str(exp):
-                print('WARNING: ran out of memory, trying to lower the batch_size')
+                logger.warning("System ran out of memory, trying to lower the batch_size")
                 for p in self.model.parameters():
                     if p.grad is not None:
                         del p.grad
@@ -161,6 +168,7 @@ class Learner(object):
                 time.sleep(5)
                 self.batch_size -= 2
                 if self.batch_size <= 0:
+                    logger.warning("Unable to lower batch_size anymore - cannot handle memory overflow")
                     raise exp
                 self.stats.change_batch_size(self.batch_size)
                 return
@@ -212,7 +220,7 @@ class Learner(object):
     def _update_elite_features(self):
         if self.training_iteration % self.flags.elite_reset_period == 0:
             with self.batch_lock:
-                print("recalculating features")
+                logger.info("Updating elite set feature_vecs with current model policy")
                 prior_states = self.replay_buffers[1].get_prior_buf_states()
 
                 self.feature_reset_model.load_state_dict({k: v.cpu() for k, v in self.model.state_dict().items()})
@@ -231,7 +239,6 @@ class Learner(object):
                 #         feature_vecoefs = torch.cat((feature_vecoefs, feature_vecoefs_prior.cpu()), 0)
                 # self.replay_buffer.set_feature_vecoefs_prior(feature_vecoefs)
 
-                print("recalculating features DONE")
 
     def _save_current_model_state(self):
         torch.save({"model_state_dict": self.model.state_dict(),

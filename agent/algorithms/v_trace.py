@@ -48,7 +48,7 @@ def v_trace(actions, beh_logits, bootstrap_value, current_logits, current_values
     cross_entropy = cross_entropy.view_as(advantages_vt)
 
     # cannot used "target_action_log_probs" instead of cross_entropy because some gradients created during
-    # target_action_log_probs calculation cannot be replicated deterministically and therefore reproducibility cannot be assured
+    # target_action_log_probs calculation cannot be replicated deterministically during backprop and therefore reproducibility cannot be assured
 
     policy_loss = torch.sum(cross_entropy * advantages_vt)
 
