@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import flatten
-from model.utils import weights_init_xavier, num_flat_features
+from model.utils import weights_init_xavier, num_flat_features, normalized_columns_initializer
 
 
 class ModelNetwork(nn.Module):
@@ -9,9 +9,9 @@ class ModelNetwork(nn.Module):
         super(ModelNetwork, self).__init__()
         self.actions_count = actions_count
 
-        self.conv1 = nn.Conv2d(3, 64, stride=2, kernel_size=3)
-        self.conv2 = nn.Conv2d(64, 64, stride=2, kernel_size=3)
-        self.conv3 = nn.Conv2d(64, 128, stride=2, kernel_size=3)
+        self.conv1 = nn.Conv2d(3, 64, stride=(2, 2), kernel_size=(3, 3))
+        self.conv2 = nn.Conv2d(64, 64, stride=(2, 2), kernel_size=(3, 3))
+        self.conv3 = nn.Conv2d(64, 128, stride=(2, 2), kernel_size=(3, 3))
 
         self.fc1 = nn.Linear(128 * 9 * 9, 512)
 
@@ -19,12 +19,12 @@ class ModelNetwork(nn.Module):
         self.fc4 = nn.Linear(512, 1)
 
         self.apply(weights_init_xavier)
-        # self.fc2.weight.data = normalized_columns_initializer(
-        #     self.fc2.weight.data, 0.01)
-        # self.fc2.bias.data.fill_(0)
-        # self.fc4.weight.data = normalized_columns_initializer(
-        #     self.fc4.weight.data, 1.0)
-        # self.fc4.bias.data.fill_(0)
+        self.fc2.weight.data = normalized_columns_initializer(
+            self.fc2.weight.data, 0.01)
+        self.fc2.bias.data.fill_(0)
+        self.fc4.weight.data = normalized_columns_initializer(
+            self.fc4.weight.data, 1.0)
+        self.fc4.bias.data.fill_(0)
 
         self.train()
 

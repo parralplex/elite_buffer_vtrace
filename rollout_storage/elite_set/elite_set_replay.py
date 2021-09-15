@@ -28,8 +28,6 @@ class EliteSetReplay(ExperienceReplayTorch):
             return index
         index = self.insert_strategy.calculate_best_index_pos(feature_vecs=self.feature_vecs, new_feature_vec=kwargs['feature_vec'],
                                                               new_reward=kwargs['reward'], **kwargs)
-        if index == -1:
-            return index
         return index
 
     def _store(self, index, **kwargs):

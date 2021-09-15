@@ -17,12 +17,17 @@ class RolloutWorker(object):
         self.device = torch.device("cpu")
         self.verbose = verbose
         self.flags = flags
+        self.seed = flags.seed + id
         if flags.reproducible:
-            torch.cuda.manual_seed(flags.seed)
-            torch.cuda.manual_seed_all(flags.seed)
-            torch.manual_seed(flags.seed)
-            np.random.seed(flags.seed)
-            random.seed(flags.seed)
+            if torch.cuda.is_available():
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
+                torch.cuda.manual_seed(flags.seed)
+                torch.cuda.manual_seed_all(flags.seed)
+            torch.use_deterministic_algorithms(True)
+            torch.manual_seed(self.seed)
+            np.random.seed(self.seed)
+            random.seed(self.seed)
 
         self.model = ModelNetwork(flags.actions_count).eval()
 
@@ -42,7 +47,7 @@ class RolloutWorker(object):
             self.env_steps.append(0)
             env = atari_wrappers.wrap_pytorch(
                 atari_wrappers.wrap_deepmind(
-                    atari_wrappers.make_atari(flags.env, flags.seed),
+                    atari_wrappers.make_atari(flags.env, self.seed + i * 2),
                     episode_life=True,
                     clip_rewards=False,
                     frame_stack=True,

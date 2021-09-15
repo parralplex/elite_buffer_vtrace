@@ -25,8 +25,10 @@ parser.add_argument('--rho-const', type=float, default=1)
 
 # REPRODUCIBILITY
 randomize_seed = int.from_bytes(os.urandom(4), byteorder="little")
-parser.add_argument('--seed', type=int, default=0)
+parser.add_argument('--seed', type=int, default=1) #14372685
 parser.add_argument('--reproducible', type=bool, default=False)
+parser.add_argument('--replay_out_cache_size', type=int, default=10)
+parser.add_argument('--max_cache_pos_pointer', type=int, default=1000000)
 
 # ENVIRONMENT
 env_name = 'PongNoFrameskip-v4'
@@ -53,7 +55,7 @@ parser.add_argument('--training_max_steps', type=int, default=10000000, help='to
 parser.add_argument('--max_avg_reward', type=float, default=20.2, help='max avg(100) episode reword at which the training stops.')
 
 # REPLAY BUFFER
-parser.add_argument('--replay_writer_cache_size', type=int, default=10, help='how many worker observations(which are to be written to replay buffer) can be stored before some of them have to discarded to save memory')
+parser.add_argument('--replay_writer_queue_size', type=int, default=10, help='how many worker observations(which are to be written to replay buffer) can be stored before some of them have to discarded to save memory')
 parser.add_argument("--discarding_strategy", default="keep_latest", choices=["keep_latest", "keep_oldest", "alternating"], help="How replay writer resolves cache queue overflow")
 parser.add_argument("--use_state_compression", type=bool, default=True, help="Determines if the states in replay buffers are compressed or not.")
 
@@ -75,6 +77,8 @@ parser.add_argument('--add_rew_feature', type=bool, default=True, help="feature 
 parser.add_argument('--p', type=int, default=2, help="p-norm index used while calculation distances between feature vecs in elite set.")
 parser.add_argument('--elite_pop_strategy', default="lim_zero", choices=["lim_zero", "lim_inf", "brute_force"], help="Strategy used to calculate best possible place(index) in elite set for new observation")
 parser.add_argument('--rnd_index_chance', type=float, default=0, help="Chance that observation will be inserted into elite set on random index regardless of the population strategy selected")
+parser.add_argument('--reward_time_decay', type=bool, default=False, help="Determines if rewards in reward_sum_buffer are decayed over time - only some strategies support this option")
+parser.add_argument('--reward_time_decay_step', type=float, default=0.0001)
 
 # TEST
 parser.add_argument("--test_episode_count", type=int, default=1000, help="Number of episodes that should be executed during testing.")

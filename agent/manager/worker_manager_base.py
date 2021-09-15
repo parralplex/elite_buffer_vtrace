@@ -1,5 +1,8 @@
 import abc
-from utils import compress
+import time
+
+from rollout_storage.experience_replay_proxy import ExperienceReplayProxy
+from utils import logger
 
 
 class WorkerManagerBase(metaclass=abc.ABCMeta):
@@ -10,6 +13,9 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
         self.stats = stats
         self.training_event = training_event
         self.flags = flags
+        if isinstance(self.replay_buffers[0], ExperienceReplayProxy):
+            for p in range(len(self.replay_buffers)):
+                self.replay_buffers[p].start()
 
     @classmethod
     def __subclasshook__(cls, subclass):
@@ -18,44 +24,47 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
                 hasattr(subclass, 'pre_processing') and
                 callable(subclass.pre_processing) and
                 hasattr(subclass, 'update_model_data') and
-                callable(subclass.update_model_data))
+                callable(subclass.update_model_data) and
+                hasattr(subclass, 'reset') and
+                callable(subclass.reset)
+                )
 
-    def manage_workers(self, post_processing_func=None, *args):
-        while True:
-            if self.stop_event.is_set():
+    def manage_workers(self):
+        try:
+            while True:
+                if self.stop_event.is_set():
+                    self.clean_up()
+                    for p in range(len(self.replay_buffers)):
+                        self.replay_buffers[p].close()
+                    break
+                self.pre_processing()
+                workers_data = self.plan_and_execute_workers()
+                if self.flags.reproducible and self.training_event.is_set():
+                    for p in range(len(self.replay_buffers)):
+                        self.replay_buffers[p].cache_filled_event.wait()
+
+                for i in range(len(workers_data)):
+                    self.store_worker_data(workers_data[i][0])
+                    _, _, rewards, ep_steps = workers_data[i]
+                    self.stats.process_worker_rollout(rewards, ep_steps)
+                if self.flags.reproducible and self.training_event.is_set():
+                    self.replay_buffers[0].cache(self.flags.replay_out_cache_size)
+        except:
+            if not self.flags.reproducible:
+                logger.exception("Worker manager thread raise new exception - ending execution")
+                self.stop_event.set()
                 self.clean_up()
-                break
-            self.pre_processing()
-            workers_data = self.plan_and_execute_workers()
-            for i in range(len(workers_data)):
-                self.store_worker_data(workers_data[i][0])
-                _, _, rewards, ep_steps = workers_data[i]
-                self.stats.process_worker_rollout(rewards, ep_steps)
-            if self.flags.reproducible:
-                post_processing_func(args[0])
+                for p in range(len(self.replay_buffers)):
+                    self.replay_buffers[p].close()
+            else:
+                raise
 
     @abc.abstractmethod
     def plan_and_execute_workers(self):
         raise NotImplementedError
 
     def store_worker_data(self, worker_data):
-        if self.flags.reproducible:
-            for i in range(len(worker_data)):
-                for p in range(len(self.replay_buffers)):
-                    state = worker_data[i].states
-                    if self.flags.use_state_compression:
-                        state = compress(state)
-                    self.replay_buffers[p].store_next(state=state,
-                                                      action=worker_data[i].actions,
-                                                      reward=worker_data[i].rewards,
-                                                      logits=worker_data[i].logits,
-                                                      not_done=worker_data[i].not_done,
-                                                      feature_vec=worker_data[i].feature_vec,
-                                                      random_search=self.flags.random_search,
-                                                      add_rew_feature=self.flags.add_rew_feature,
-                                                      p=self.flags.p)
-        else:
-            self.replay_writer.write(worker_data)
+        self.replay_writer.write(worker_data)
 
     @abc.abstractmethod
     def pre_processing(self):
@@ -66,7 +75,10 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     def clean_up(self):
-        if not self.training_event.is_set():              # deadlock prevention
+        if not self.training_event.is_set():  # deadlock prevention
             for p in range(len(self.replay_buffers)):
                 self.replay_buffers[p].replay_filled_event.set()
 
+    @abc.abstractmethod
+    def reset(self):
+        raise NotImplementedError

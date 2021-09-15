@@ -3,9 +3,9 @@ import pickle
 import logging
 
 
-def compress(data):
+def compress(data, compression_level=0):
     serialized_byte_arr = pickle.dumps(data)
-    cmp_data = lz4.frame.compress(serialized_byte_arr)
+    cmp_data = lz4.frame.compress(serialized_byte_arr, compression_level)
     return cmp_data
 
 
@@ -31,7 +31,7 @@ def merge_grad(model_a, model_b):
 logger = logging.getLogger('Debug_logger')
 
 
-def _set_up_logger(save_url):
+def create_logger(save_url):
     global logger
     new_logger = logging.getLogger('Debug_logger')
     new_logger.setLevel(logging.DEBUG)
@@ -53,4 +53,17 @@ def _set_up_logger(save_url):
     file_handler.setFormatter(formatter)
     new_logger.addHandler(file_handler)
     logger = new_logger
-    
+
+
+def change_logger_file_handler(save_url):
+    global logger
+    logger.handlers[1].close()
+    logger.removeHandler(logger.handlers[1])
+    file_handler = logging.FileHandler(filename=save_url + '/debug.log', mode='w', encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter('%(asctime)s - %(processName)s - %(threadName)s - %(levelname)s - %(message)s',
+                                  '%H:%M:%S')
+
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)

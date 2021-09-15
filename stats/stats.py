@@ -50,6 +50,8 @@ class Statistics(object):
         self.WARM_UP_TIME = dt.datetime.now()
 
     def process_worker_rollout(self, rewards, ep_steps):
+        if len(rewards) != len(ep_steps):
+            raise ValueError("Unequal number of rewards and steps is not possible!")
         self.worker_rollout_counter += 1
         self.episodes += len(rewards)
 
@@ -118,6 +120,7 @@ class Statistics(object):
 
         stats_file_desc = open(self.file_save_dir_url + "/training_summary.txt", "w", 1)
         stats_file_desc.write("Warm_up_period: " + str(self.warm_up_period) + '\n')
+        stats_file_desc.write("Targeted_reward_possible_ending_condition: " + str(self.flags.max_avg_reward) + '\n')
         stats_file_desc.write("Max_reach_reward: " + str(self.max_reward) + '\n')
         stats_file_desc.write("Max_avg(100)_reward: " + str(self.max_avg_reward) + '\n')
         stats_file_desc.write("Total_episodes: " + str(self.episodes) + '\n')
@@ -140,6 +143,9 @@ class Statistics(object):
     def _create_charts(self):
         avg_buf_size = self.episodes * 0.001
         ignore_period = avg_buf_size / 2
+        if avg_buf_size <= 1:
+            avg_buf_size = 10
+            ignore_period = 1
         os.mkdir(self.file_save_dir_url + "/Charts")
         set_global_chart_settings()
         create_chart(self.file_save_dir_url, stat_file_names[0], 'Episodes', 'Reward per episode', ["Avg(" + str(avg_buf_size) + ")"], "reward_chart.png", avg_buf_size)

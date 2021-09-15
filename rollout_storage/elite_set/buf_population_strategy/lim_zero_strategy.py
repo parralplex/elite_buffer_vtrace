@@ -20,7 +20,7 @@ class LimZeroStrategy(EliteSetInsertStrategy):
     def calculate_best_index_pos(self, feature_vecs, new_feature_vec, new_reward, **kwargs):
         self.update_entry = True
         entry_rew = torch.sum(new_reward)
-        if entry_rew < self.min_sum_reward:
+        if entry_rew.item() < self.min_sum_reward:
             return -1
 
         self.reset_idx()
@@ -40,6 +40,10 @@ class LimZeroStrategy(EliteSetInsertStrategy):
             self.min_sum_reward = min(self.rew_sum)
         else:
             self.rew_sum[self.entry_idx] = entry_rew
+
+        if kwargs['reward_time_decay']:
+            for i in range(len(self.rew_sum)):
+                self.rew_sum[i] -= self.flags.reward_time_decay_step
             
         return self.entry_idx
 
@@ -57,7 +61,7 @@ class LimZeroStrategy(EliteSetInsertStrategy):
 
     def on_insert_before_filled(self, index, **kwargs):
         entry_rew = torch.sum(kwargs['reward'])
-        if entry_rew < self.min_sum_reward:
+        if entry_rew.item() < self.min_sum_reward:
             self.min_sum_reward = entry_rew
         self.rew_sum[index] = entry_rew
 
