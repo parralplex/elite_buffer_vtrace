@@ -6,6 +6,8 @@ import random
 class EliteSetInsertStrategy(metaclass=abc.ABCMeta):
     def __init__(self, flags):
         self.flags = flags
+        self.buf_size = flags.elite_set_size
+        self.local_random = random.Random(self.flags.seed)
 
     @classmethod
     def __subclasshook__(cls, subclass):
@@ -19,7 +21,7 @@ class EliteSetInsertStrategy(metaclass=abc.ABCMeta):
     def calculate_best_index_pos(self, feature_vecs, new_feature_vec, new_reward, **kwargs):
         offset = 0
         if kwargs["random_search"]:
-            offset = random.randint(0, self.flags.elite_set_size - 1)
+            offset = self.local_random.randint(0, self.flags.elite_set_size - 1)
         for i in range(self.flags.elite_set_size):
             if kwargs["random_search"]:
                 index = (i + offset) % self.flags.elite_set_size
@@ -27,6 +29,7 @@ class EliteSetInsertStrategy(metaclass=abc.ABCMeta):
                 index = i
             distance = torch.dist(feature_vecs[index], new_feature_vec, p=kwargs['p'])
             if not self.process_dist(distance, index):
+                print("DISTANCE IS 0")
                 return
 
     @abc.abstractmethod

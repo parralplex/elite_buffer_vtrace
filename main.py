@@ -22,13 +22,17 @@ if __name__ == '__main__':
     if flags.op_mode == "train" or flags.op_mode == "train_w_load":
 
         for i in range(1):
-            batch_size = 30
-            r_f_steps = 60
+            batch_size = 20
+            r_f_steps = 20
             replay_buffer_size = 1000
             backend = "ray"
             reproducible = True
-            replay_out_cache_size = 15
-            for j in range(3):
+            replay_out_cache_size = 20
+            elite_set_data_ratio = 1
+            elite_set_size = 1000
+            replay_data_ratio = 1
+            elite_pop_strategy = "lim_inf"
+            for j in range(1):
                 run_id = int(dt.datetime.timestamp(dt.datetime.now()))
                 save_url = "results/" + flags.env + "_" + str(run_id)
                 os.makedirs(save_url)
@@ -37,32 +41,25 @@ if __name__ == '__main__':
                 else:
                     change_logger_file_handler(save_url)
                 logger.info("Starting execution " + str(run_id) + " with order number " + str(j))
-                if j == 1:
-                    replay_out_cache_size = 15
-                if j == 2:
-                    replay_out_cache_size = 20
-                # if j % 2 == 1:
-                #     backend = "python_native"
-                # else:
-                #     if j == 2:
-                #         r_f_steps += 20
-                #         batch_size -= 60
-                #         replay_buffer_size = 2000
-                #     elif j == 4:
-                #         r_f_steps += 20
-                #         batch_size -= 20
-                #         replay_buffer_size = 1333
-                #     elif j == 4:
-                #         r_f_steps += 20
-                #         batch_size -= 10
-                #         replay_buffer_size = 1000
-                #     elif j == 8:
-                #         reproducible = True
-                #     backend = "ray"
-                # if j == 9:
-                #     backend = "ray"
 
-                flags = change_args(batch_size=batch_size, r_f_steps=r_f_steps, multiprocessing_backend=backend, replay_buffer_size=replay_buffer_size,reproducible=reproducible, replay_out_cache_size=replay_out_cache_size)
+                if j == 0:
+                    replay_buffer_size = 700
+                    elite_set_size = 300
+                    replay_data_ratio = 0.7
+                    elite_set_data_ratio = 0.3
+                elif j == 1:
+                    replay_buffer_size = 850
+                    elite_set_size = 150
+                    replay_data_ratio = 0.85
+                    elite_set_data_ratio = 0.15
+                elif j == 2:
+                    replay_buffer_size = 950
+                    elite_set_size = 50
+                    replay_data_ratio = 0.95
+                    elite_set_data_ratio = 0.05
+
+                flags = change_args(batch_size=batch_size, r_f_steps=r_f_steps, multiprocessing_backend=backend, replay_buffer_size=replay_buffer_size,reproducible=reproducible, replay_out_cache_size=replay_out_cache_size,
+                                    elite_set_size=elite_set_size, replay_data_ratio=replay_data_ratio, elite_set_data_ratio=elite_set_data_ratio, elite_pop_strategy=elite_pop_strategy)
 
                 if flags.reproducible:
                     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -73,7 +70,7 @@ if __name__ == '__main__':
                     torch.cuda.manual_seed(flags.seed)
                     torch.cuda.manual_seed_all(flags.seed)
                     torch.manual_seed(flags.seed)
-                    np.random.seed(flags.seed)
+                    np.random.seed(flags.seed) # Beware that numpy.random. IS NOT THREAD-SAFE !! Avoid usage if possible!
                     random.seed(flags.seed)
 
                 try:

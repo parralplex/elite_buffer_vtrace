@@ -1,4 +1,5 @@
-import numpy as np
+import random
+
 import torch
 
 from rollout_storage.intefaces.replay_buf_base import ReplayBufferBase
@@ -13,6 +14,7 @@ class ExperienceReplayTorch(ReplayBufferBase):
         self.pos_pointer = 0
         self.replay_filled_event = Event()
         self.batch_lock = batch_lock
+        self.index_array = [i for i in range(self.flags.replay_buffer_size)]
 
         self.states = torch.zeros(self.flags.replay_buffer_size, self.flags.r_f_steps, *self.flags.observation_shape)
         self.actions = torch.zeros(self.flags.replay_buffer_size, self.flags.r_f_steps)
@@ -49,8 +51,11 @@ class ExperienceReplayTorch(ReplayBufferBase):
         self.pos_pointer += 1
         return index
 
-    def random_sample(self, batch_size):
-        indices = np.random.choice(self.flags.replay_buffer_size, int(batch_size * self.flags.replay_data_ratio))
+    def random_sample(self, batch_size, local_random=None):
+        if local_random is None:
+            indices = random.choices(self.index_array, k=int(batch_size * self.flags.replay_data_ratio))
+        else:
+            indices = local_random.choices(self.index_array, k=int(batch_size * self.flags.replay_data_ratio))
         return self._get_batch(indices)
 
     def _get_batch(self, indices):

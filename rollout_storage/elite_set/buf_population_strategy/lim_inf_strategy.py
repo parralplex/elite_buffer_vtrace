@@ -14,6 +14,7 @@ class LimInfStrategy(LimZeroStrategy):
         elif distance > self.entry_distance:
             self.entry_idx = index
             self.entry_distance = distance
+        return True
 
     def reset_idx(self):
         self.entry_idx = 0

@@ -12,27 +12,28 @@ class LimZeroStrategy(EliteSetInsertStrategy):
         super().__init__(flags)
         self.min_sum_reward = -sys.maxsize
         self.rew_sum = torch.zeros(self.flags.elite_set_size)
-        self.entry_idx = 0
+        self.entry_idx = -1
         self.entry_distance = sys.maxsize
         self.update_entry = True
 
-    @rand_output(chance=flags.rnd_index_chance)
+    @rand_output(chance=flags.rnd_index_chance, seed=flags.seed)
     def calculate_best_index_pos(self, feature_vecs, new_feature_vec, new_reward, **kwargs):
         self.update_entry = True
+        # entry_rew = abs(torch.sum(new_reward))
         entry_rew = torch.sum(new_reward)
-        if entry_rew.item() < self.min_sum_reward:
-            return -1
+        # if entry_rew.item() < self.min_sum_reward:
+        #     return -1
 
         self.reset_idx()
 
         if kwargs['add_rew_feature']:
-            feature_vec_rewarded = new_feature_vec + entry_rew
-            super(LimZeroStrategy, self).calculate_best_index_pos(feature_vecs, feature_vec_rewarded, new_reward, **kwargs)
-        else:
-            super(LimZeroStrategy, self).calculate_best_index_pos(feature_vecs, new_feature_vec,
-                                                                  new_reward, **kwargs)
+            new_feature_vec = new_feature_vec + entry_rew
+
+        super(LimZeroStrategy, self).calculate_best_index_pos(feature_vecs, new_feature_vec, new_reward, **kwargs)
         
-        if not self.update_entry or entry_rew < self.rew_sum[self.entry_idx]:
+        # if not self.update_entry or self.entry_idx == -1 or entry_rew < self.rew_sum[self.entry_idx]:
+        #     return -1
+        if not self.update_entry or self.entry_idx == -1:
             return -1
 
         if self.rew_sum[self.entry_idx] == self.min_sum_reward:
@@ -44,19 +45,21 @@ class LimZeroStrategy(EliteSetInsertStrategy):
         if kwargs['reward_time_decay']:
             for i in range(len(self.rew_sum)):
                 self.rew_sum[i] -= self.flags.reward_time_decay_step
+            self.min_sum_reward -= self.flags.reward_time_decay_step
             
         return self.entry_idx
 
     def process_dist(self, distance, index) -> bool:
-        if distance == 0:
+        if distance == 0.0:
             self.update_entry = False
             return False
         elif distance < self.entry_distance:
             self.entry_idx = index
             self.entry_distance = distance
+        return True
 
     def reset_idx(self):
-        self.entry_idx = 0
+        self.entry_idx = -1
         self.entry_distance = sys.maxsize
 
     def on_insert_before_filled(self, index, **kwargs):

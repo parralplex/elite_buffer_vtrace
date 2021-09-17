@@ -26,7 +26,7 @@ class RolloutWorker(object):
                 torch.cuda.manual_seed_all(flags.seed)
             torch.use_deterministic_algorithms(True)
             torch.manual_seed(self.seed)
-            np.random.seed(self.seed)
+            np.random.seed(self.seed)  # Beware that numpy.random. IS NOT THREAD-SAFE !! Avoid usage if possible!
             random.seed(self.seed)
 
         self.model = ModelNetwork(flags.actions_count).eval()

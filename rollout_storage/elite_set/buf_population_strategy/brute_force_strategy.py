@@ -15,8 +15,9 @@ class BruteForceStrategy(EliteSetInsertStrategy):
         self.new_tr_dis_buf = []
         self.new_tr_dis_sum = 0
         self.swap_index = -1
+        self.local_random = random.Random(flags.seed)
 
-    @rand_output(chance=flags.rnd_index_chance)
+    @rand_output(chance=flags.rnd_index_chance, seed=flags.seed)
     def calculate_best_index_pos(self, feature_vecs, new_feature_vec, new_reward, **kwargs):
         entry_rew = torch.sum(new_reward)
 
@@ -34,7 +35,7 @@ class BruteForceStrategy(EliteSetInsertStrategy):
 
         offset = 0
         if kwargs["random_search"]:
-            offset = random.randint(0, self.flags.elite_set_size - 1)
+            offset = self.local_random.randint(0, self.flags.elite_set_size - 1)
         for i in range(self.flags.elite_set_size):
             if kwargs["random_search"]:
                 index = (i + offset) % self.flags.elite_set_size

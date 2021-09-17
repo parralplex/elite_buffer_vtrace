@@ -29,6 +29,7 @@ class Tester(object):
         self.ep_counter = 0
         observation = self.env.reset()
         reward_ep = 0
+        total_rew = 0
 
         while self.ep_counter < self.test_ep_count:
             logits, _ = self.model(observation, no_feature_vec=True)
@@ -41,8 +42,10 @@ class Tester(object):
             if done:
                 self.ep_counter += 1
                 print("Episode: ", self.ep_counter, " Reward: ", reward_ep)
+                total_rew += reward_ep
                 reward_ep = 0
                 observation = self.env.reset()
             if render:
                 self.env.render()
         self.env.close()
+        return total_rew

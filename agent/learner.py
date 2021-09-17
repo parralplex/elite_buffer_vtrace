@@ -1,3 +1,5 @@
+import random
+import sys
 import time
 
 import torch
@@ -24,14 +26,6 @@ from scheduler.multi_step_lr import MultiStepLRStr
 from stats.stats import Statistics
 from utils import logger
 from threading import Condition
-
-
-class MissingMethod(Exception):
-    pass
-
-
-class ForbiddenSetting(Exception):
-    pass
 
 
 class Learner(object):
@@ -63,6 +57,7 @@ class Learner(object):
 
         self.learning_lock = threading.Lock()
         self.batch_lock = threading.Lock()
+        self.mini_batcher_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.training_event = threading.Event()
 
@@ -70,7 +65,11 @@ class Learner(object):
 
         self.training_iteration = 0
 
-        self.replay_buffers = [ExperienceReplayProxy(ExperienceReplayTorch(self.batch_lock, self.flags))]
+        self.replay_buffers = []
+
+        if self.flags.use_replay_buffer:
+            self.replay_buffers.append(ExperienceReplayProxy(ExperienceReplayTorch(self.batch_lock, self.flags), self.file_save_dir_url))
+
         if self.flags.use_elite_set:
             elite_pop_strategy = None
             if self.flags.elite_pop_strategy == "lim_zero":
@@ -79,7 +78,11 @@ class Learner(object):
                 elite_pop_strategy = LimInfStrategy(self.flags)
             elif self.flags.elite_pop_strategy == "brute_force":
                 elite_pop_strategy = BruteForceStrategy(self.flags)
-            self.replay_buffers.append(ExperienceReplayProxy(EliteSetReplay(self.batch_lock, (self.model.get_flatten_layer_output_size(),), elite_pop_strategy, self.flags)))
+            self.replay_buffers.append(ExperienceReplayProxy(EliteSetReplay(self.batch_lock, (self.model.get_flatten_layer_output_size(),), elite_pop_strategy, self.flags, self.file_save_dir_url), self.file_save_dir_url))
+
+        if len(self.replay_buffers) == 0:
+            raise ForbiddenSetting(
+                "No replay buffer has been selected - application has not been modified to work without any buffer to store worker trajectories")
 
         replay_writer_strategy = None
         if self.flags.discarding_strategy == "keep_latest":
@@ -95,13 +98,13 @@ class Learner(object):
 
         if self.flags.multiprocessing_backend == "ray":
             from agent.manager.ray_worker_manager import RayWorkerManager # local import so ray is not imported when using python_native multiprocessing
-            self.worker_manager = RayWorkerManager(self.stop_event, self.training_event, self.replay_writer, self.replay_buffers, self.model, self.stats, self.flags, False)
+            self.worker_manager = RayWorkerManager(self.stop_event, self.training_event, self.replay_writer, self.replay_buffers, self.model, self.stats, self.flags, self.file_save_dir_url, False)
         elif self.flags.multiprocessing_backend == "python_native":
             if mp.get_start_method() != "spawn":
                 self.replay_writer.close()
                 self.stats.close()
                 raise ForbiddenSetting("This app only supports 'spawn' type sub-processes when working with python-native backend")
-            self.worker_manager = NativeWorkerManager(self.stop_event, self.training_event, self.replay_writer, self.replay_buffers, self.model, self.stats, self.flags, False)
+            self.worker_manager = NativeWorkerManager(self.stop_event, self.training_event, self.replay_writer, self.replay_buffers, self.model, self.stats, self.flags, self.file_save_dir_url, False)
 
         self.batch_size = self.flags.batch_size
         self.data_pos_pointer = 0
@@ -130,6 +133,7 @@ class Learner(object):
         return 0
 
     def learning(self):
+        local_random = random.Random(self.flags.seed)
         try:
             for p in range(len(self.replay_buffers)):
                 self.replay_buffers[p].replay_filled_event.wait()
@@ -139,15 +143,15 @@ class Learner(object):
             while self.training_iteration < self.flags.training_max_steps:
                 if self.stop_event.is_set():
                     break
-                self._learning_iteration()
+                self._learning_iteration(local_random)
         except Exception as exp:
             logger.exception("Learning thread raise new exception - ending execution")
         self.worker_manager.update_model_data(self.model)
         self.stop_event.set()
 
-    def _learning_iteration(self):
+    def _learning_iteration(self, local_random):
         try:
-            actions, beh_logits, not_done, rewards, states, counter = self._prepare_batch()
+            actions, beh_logits, not_done, rewards, states, counter = self._prepare_batch(local_random)
             if actions is None:
                 return
 
@@ -233,15 +237,19 @@ class Learner(object):
         self.lr_scheduler.step()
         self.stats.process_learning_iter(policy_loss.item(), baseline_loss.item(), entropy_loss.item(), self.lr_scheduler.get_last_lr()[0])
 
-    def _prepare_batch(self):
+    def _prepare_batch(self, local_random):
+        if self.flags.reproducible:
+            self.mini_batcher_lock.acquire()
         states, actions, rewards, beh_logits, not_done, counter = self.replay_buffers[0].random_sample(
-            self.batch_size)
+            self.batch_size, local_random)
         if states is None:
             return actions, beh_logits, not_done, rewards, states, counter
 
         for i in range(1, len(self.replay_buffers)):
-            states_n, actions_n, rewards_n, beh_logits_n, not_done_n = self.replay_buffers[i].random_sample(
-                self.batch_size)
+            states_n, actions_n, rewards_n, beh_logits_n, not_done_n, ctr = self.replay_buffers[i].random_sample(
+                self.batch_size, local_random)
+            if self.flags.reproducible and counter != ctr:
+                raise ThreadingSyncError("Data indexes of mini-batches should be the same ! - synchronization error")
             if states_n is None:
                 return actions_n, beh_logits_n, not_done_n, rewards_n, states_n
             states = torch.cat((states, states_n), 0)
@@ -249,6 +257,8 @@ class Learner(object):
             rewards = torch.cat((rewards, rewards_n), 0)
             beh_logits = torch.cat((beh_logits, beh_logits_n), 0)
             not_done = torch.cat((not_done, not_done_n), 0)
+        if self.flags.reproducible:
+            self.mini_batcher_lock.release()
 
         states, actions, rewards, beh_logits, not_done = states.to(self.device).transpose(1, 0), actions.to(
             self.device).transpose(1, 0), rewards.to(self.device).transpose(1, 0), beh_logits.to(self.device).transpose(
@@ -260,23 +270,26 @@ class Learner(object):
         if self.training_iteration % self.flags.elite_reset_period == 0:
             with self.batch_lock:
                 logger.info("Updating elite set feature_vecs with current model policy")
-                prior_states = self.replay_buffers[1].get_prior_buf_states()
+                for i in range(len(self.replay_buffers)):
+                    if (isinstance(self.replay_buffers[i], ExperienceReplayProxy) and isinstance(self.replay_buffers[i].experience_replay, EliteSetReplay)) or isinstance(self.replay_buffers[i], EliteSetReplay):
 
-                self.feature_reset_model.load_state_dict({k: v.cpu() for k, v in self.model.state_dict().items()})
+                        prior_states = self.replay_buffers[i].get_prior_buf_states()
 
-                with torch.no_grad():
-                    _, _, feature_vecs_prior = self.feature_reset_model(prior_states, True)
-                self.replay_buffers[1].set_feature_vecs_prior(feature_vecs_prior)
+                        self.feature_reset_model.load_state_dict({k: v.cpu() for k, v in self.model.state_dict().items()})
 
-                # feature_vecoefs = None
-                # for j in range(6):
-                #     with torch.no_grad():
-                #         _, _, feature_vecoefs_prior = self.model(prior_states[j*100:(j+1)*100].cuda(), True)
-                #     if feature_vecoefs is None:
-                #         feature_vecoefs = feature_vecoefs_prior.cpu()
-                #     else:
-                #         feature_vecoefs = torch.cat((feature_vecoefs, feature_vecoefs_prior.cpu()), 0)
-                # self.replay_buffer.set_feature_vecoefs_prior(feature_vecoefs)
+                        with torch.no_grad():
+                            _, _, feature_vecs_prior = self.feature_reset_model(prior_states, True)
+                        self.replay_buffers[i].set_feature_vecs_prior(feature_vecs_prior)
+
+                        # feature_vecoefs = None
+                        # for j in range(6):
+                        #     with torch.no_grad():
+                        #         _, _, feature_vecoefs_prior = self.model(prior_states[j*100:(j+1)*100].cuda(), True)
+                        #     if feature_vecoefs is None:
+                        #         feature_vecoefs = feature_vecoefs_prior.cpu()
+                        #     else:
+                        #         feature_vecoefs = torch.cat((feature_vecoefs, feature_vecoefs_prior.cpu()), 0)
+                        # self.replay_buffer.set_feature_vecoefs_prior(feature_vecoefs)
 
     def _save_current_model_state(self):
         torch.save({"model_state_dict": self.model.state_dict(),
@@ -289,9 +302,21 @@ class Learner(object):
             json.dump(self.flags.__dict__, file, indent=2)
 
     def _load_model_state(self, url):
-        # TODO check if url is valid
         state_dict = torch.load(url)
         self.model.load_state_dict(state_dict["model_state_dict"])
         self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
         self.lr_scheduler.load_state_dict(state_dict["scheduler_state_dict"])
         self.flags = state_dict["flags"]
+
+
+class MissingMethod(Exception):
+    pass
+
+
+class ForbiddenSetting(Exception):
+    pass
+
+
+class ThreadingSyncError(Exception):
+    pass
+

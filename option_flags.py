@@ -53,8 +53,11 @@ parser.add_argument("--shared_queue_size", type=int, default=4, help="Size of th
 parser.add_argument('--max_episodes', type=int, default=10000000, help='total number of episodes to be executed')
 parser.add_argument('--training_max_steps', type=int, default=10000000, help='total number of training iterations')
 parser.add_argument('--max_avg_reward', type=float, default=20.2, help='max avg(100) episode reword at which the training stops.')
+parser.add_argument('--max_avg_reward_deviation', type=float, default=0.5)
+parser.add_argument('--max_avg_rew_time_accept_deviation', type=int, default=3600, help='number of seconds after which app will accept max_avg_reward-max_avg_reward_deviation as a legitimate condition to stop execution')
 
 # REPLAY BUFFER
+parser.add_argument('--use_replay_buffer', type=bool, default=True)
 parser.add_argument('--replay_writer_queue_size', type=int, default=10, help='how many worker observations(which are to be written to replay buffer) can be stored before some of them have to discarded to save memory')
 parser.add_argument("--discarding_strategy", default="keep_latest", choices=["keep_latest", "keep_oldest", "alternating"], help="How replay writer resolves cache queue overflow")
 parser.add_argument("--use_state_compression", type=bool, default=True, help="Determines if the states in replay buffers are compressed or not.")
@@ -70,10 +73,10 @@ parser.add_argument('--verbose_worker_out_int', type=int, default=50, help='inte
 parser.add_argument('--verbose_learner_out_int', type=int, default=250, help='interval in which progress data is printed to the console')
 
 # ELITE SET
-parser.add_argument('--use_elite_set', type=bool, default=False)
-parser.add_argument("--elite_reset_period", type=int, default=200, help="Elite set features recalculation period.")
-parser.add_argument('--random_search', type=bool, default=True, help="Elite set processing(on insert) starts at random index.")
-parser.add_argument('--add_rew_feature', type=bool, default=True, help="feature vecs valus are extended by the sum of rewards")
+parser.add_argument('--use_elite_set', type=bool, default=True)
+parser.add_argument("--elite_reset_period", type=int, default=10000000, help="Elite set features recalculation period.")
+parser.add_argument('--random_search', type=bool, default=False, help="Elite set processing(on insert) starts at random index.")
+parser.add_argument('--add_rew_feature', type=bool, default=False, help="feature vecs valus are extended by the sum of rewards")
 parser.add_argument('--p', type=int, default=2, help="p-norm index used while calculation distances between feature vecs in elite set.")
 parser.add_argument('--elite_pop_strategy', default="lim_zero", choices=["lim_zero", "lim_inf", "brute_force"], help="Strategy used to calculate best possible place(index) in elite set for new observation")
 parser.add_argument('--rnd_index_chance', type=float, default=0, help="Chance that observation will be inserted into elite set on random index regardless of the population strategy selected")

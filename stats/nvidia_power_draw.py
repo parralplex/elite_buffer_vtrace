@@ -1,6 +1,7 @@
 from pynvml import *
 import subprocess
 from threading import Thread, Event
+from utils import logger
 
 
 class PowerDrawAgent:
@@ -25,8 +26,9 @@ class PowerDrawAgent:
             cores_power = 0
             package_power = 0
 
-            with subprocess.Popen(['rapl'], stdout=subprocess.PIPE) as rapl:
-                for line in rapl.stdout:
+            try:
+                output = subprocess.check_output(['rapl'], stderr=subprocess.STDOUT, universal_newlines=True)
+                for line in output:
                     parts = str(line, 'ascii').strip().split()
                     if len(parts) == 7 and parts[0] == 'Core':
                         package_power = float(parts[6][:-1])
@@ -35,6 +37,23 @@ class PowerDrawAgent:
                 if self.file_desc.closed:
                     break
                 self.file_desc.writelines(str(cores_power) + ',' + str(package_power) + ',' + str(gpu_wattage) + '\n')
+
+            except subprocess.CalledProcessError as error:
+                logger.exception("Error while executing: ralp. Returned " + str(error.output))
+
+            except FileNotFoundError as error:
+                logger.exception("Error " + error.strerror)
+
+            # with subprocess.Popen(['rapl'], stdout=subprocess.PIPE) as rapl:
+            #     for line in rapl.stdout:
+            #         parts = str(line, 'ascii').strip().split()
+            #         if len(parts) == 7 and parts[0] == 'Core':
+            #             package_power = float(parts[6][:-1])
+            #         elif len(parts) == 3 and parts[1] == 'sum:':
+            #             cores_power = float(parts[2][:-1])
+            #     if self.file_desc.closed:
+            #         break
+            #     self.file_desc.writelines(str(cores_power) + ',' + str(package_power) + ',' + str(gpu_wattage) + '\n')
 
     def close(self):
         self.stop_event.set()

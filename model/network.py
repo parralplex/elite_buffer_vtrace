@@ -14,6 +14,7 @@ class ModelNetwork(nn.Module):
         self.conv3 = nn.Conv2d(64, 128, stride=(2, 2), kernel_size=(3, 3))
 
         self.fc1 = nn.Linear(128 * 9 * 9, 512)
+        self.feature = nn.Linear(512, 128)
 
         self.fc2 = nn.Linear(512, actions_count)
         self.fc4 = nn.Linear(512, 1)
@@ -42,11 +43,10 @@ class ModelNetwork(nn.Module):
         x = F.relu(self.conv3(x))
 
         x = x.view(-1, num_flat_features(x))
-
         x_logits = F.relu(self.fc1(x))
 
         if not no_feature_vec:
-            feature_vec = x_logits
+            feature_vec = F.relu(self.feature(x_logits))
             if t_b_on_feature_vec:
                 feature_vec = feature_vec.view(t_dim, batch_dim, feature_vec.shape[1])
 
@@ -61,4 +61,4 @@ class ModelNetwork(nn.Module):
             return logits, value, feature_vec
 
     def get_flatten_layer_output_size(self):
-        return self.fc1.out_features
+        return self.feature.out_features

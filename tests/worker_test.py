@@ -1,4 +1,5 @@
 import unittest
+import torch
 
 from option_flags import flags, change_args
 from wrappers.atari_wrappers import make_atari, wrap_pytorch, wrap_deepmind
@@ -39,6 +40,15 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(total_rewards_1, total_rewards_2, 'total sum of rewards is not the same')
         self.assertEqual(total_ep_steps_1, total_ep_steps_2, 'total sum of episode_steps is not the same')
 
+    def test_updated_model_output(self):
+        flags = change_args(reproducible=False, r_f_steps=100, envs_per_worker=10)
+        self.flags = flags
+        worker = RolloutWorker(0, self.flags)
+        worker_data, worker_id, iteration_rewards, iteration_ep_steps = worker.performing(torch.load("trained_model.pt"), update=True)
+        self.assertGreater(sum(iteration_rewards), 200)
+        self.assertGreater(sum(iteration_ep_steps), 14000)
+        self.assertEqual(worker_id, 0)
+        self.assertIsNotNone(worker_data)
 
 if __name__ == '__main__':
     unittest.main()

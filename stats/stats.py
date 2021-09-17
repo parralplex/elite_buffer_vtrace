@@ -1,5 +1,8 @@
 import os
+import signal
 import sys
+import time
+
 import numpy as np
 import datetime as dt
 from queue import Queue
@@ -37,6 +40,9 @@ class Statistics(object):
         self.background_file_save = background_file_save
         self.optimizer_str_desc = optimizer_str_desc
         self.scheduler_str_desc = scheduler_str_desc
+        self.max_avg_rew_with_dev_time = None
+        signal.signal(signal.SIGTERM, self.on_critical_state_save)
+        signal.signal(signal.SIGINT, self.on_critical_state_save)
 
     @staticmethod
     def _generate_file_urls(names, path):
@@ -74,6 +80,12 @@ class Statistics(object):
                 new_max_rew = True
                 if self.max_avg_reward >= self.flags.max_avg_reward:
                     self.stop_event.set()
+                if self.max_avg_rew_with_dev_time is None and self.max_avg_reward >= (self.flags.max_avg_reward - self.flags.max_avg_reward_deviation):
+                    self.max_avg_rew_with_dev_time = time.time()
+
+        if self.max_avg_rew_with_dev_time is not None:
+            if time.time() - self.max_avg_rew_with_dev_time >= self.flags.max_avg_rew_time_accept_deviation:
+                self.stop_event.set()
 
         if len(rewards) > 0:
             self.file_writer.write([str(len(rewards)) + ',' + str(dt.datetime.now() - self.START_TIME) + ',' + str((dt.datetime.now() - self.START_TIME).total_seconds()) + "," + str(self.train_iter_counter)], 1)
@@ -146,7 +158,8 @@ class Statistics(object):
         if avg_buf_size <= 1:
             avg_buf_size = 10
             ignore_period = 1
-        os.mkdir(self.file_save_dir_url + "/Charts")
+        if not os.path.exists(self.file_save_dir_url + "/Charts"):
+            os.mkdir(self.file_save_dir_url + "/Charts")
         set_global_chart_settings()
         create_chart(self.file_save_dir_url, stat_file_names[0], 'Episodes', 'Reward per episode', ["Avg(" + str(avg_buf_size) + ")"], "reward_chart.png", avg_buf_size)
         create_chart(self.file_save_dir_url, stat_file_names[2], 'Episodes', 'Steps per episode', ["Avg(" + str(avg_buf_size) + ")"],
@@ -161,3 +174,6 @@ class Statistics(object):
         create_chart(self.file_save_dir_url, stat_file_names[4], 'Training iteration', 'Learning rate decay',
                      ["Avg(" + str(avg_buf_size) + ")"],
                      "lr_decay_chart.png", avg_buf_size)
+
+    def on_critical_state_save(self, *args):
+        self.stop_event.set()
