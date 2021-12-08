@@ -10,8 +10,15 @@ class TorchWorkerBuffer(WorkerBufferBase):
         self.rewards = torch.zeros(self.flags.r_f_steps)
         self.actions = torch.zeros(self.flags.r_f_steps)
         self.logits = torch.zeros(self.flags.r_f_steps, self.flags.actions_count)
-        self.values = torch.zeros(self.flags.r_f_steps)
         self.not_done = torch.zeros(self.flags.r_f_steps)
         self.feature_vec = torch.zeros(self.flags.r_f_steps, *feature_vec_dim)
+
+    def main_data_copy(self, worker_buffer):
+        self.states = worker_buffer.states
+        self.rewards = worker_buffer.rewards
+        self.actions = worker_buffer.actions
+        self.logits = worker_buffer.logits
+        self.not_done = worker_buffer.not_done
+        self.feature_vec = None
 
 

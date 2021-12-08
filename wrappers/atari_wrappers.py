@@ -29,6 +29,8 @@ from collections import deque
 import gym
 from gym import spaces
 import cv2
+from collections import namedtuple
+from pickle import dumps, loads
 cv2.ocl.setUseOpenCL(False)
 
 
@@ -293,66 +295,31 @@ class LazyFrames(object):
         return self._force()[..., i]
 
 
-class PreProcessFrame(gym.ObservationWrapper):
-    def __init__(self, env=None):
-        super(PreProcessFrame, self).__init__(env)
-        self.observation_space = gym.spaces.Box(low = 0, high = 255, shape = (84, 84, 1), dtype=np.uint8)
-
-    def observation(self, obs):
-        return PreProcessFrame.process(obs)
-
-    @staticmethod
-    def process(frame):
-        new_frame = np.reshape(frame, frame.shape).astype(np.float32)
-        new_frame = 0.299 * new_frame[:,:,0] + 0.587*new_frame[:, :, 1] + 0.114 * new_frame[:, :, 2]
-
-        # new_frame = new_frame[35:195:2, ::2].reshape(80, 80, 1)
-        # new_frame = new_frame[0:211:2, ::2].reshape(105, 80, 1)
-        new_frame = cv2.resize(
-            new_frame, (84, 84), interpolation=cv2.INTER_AREA
-        ).reshape(84, 84, 1)
-
-        return new_frame.astype(np.uint8)
+ActionResult = namedtuple("action_result", ("snapshot", "observation", "reward", "is_done", "info"))
 
 
-def make_atari(env_id, seed, max_episode_steps=None):
-    env = gym.make(env_id)
-    np.random.seed(seed)
-    cv2.setRNGSeed(0)
-    env.seed(seed)
-    env.action_space.seed(seed)
-    assert 'NoFrameskip' in env.spec.id
-    # env = NoopResetEnv(env, noop_max=30)
-    env = MaxAndSkipEnv(env, skip=5)
+class WithSnapshots(gym.Wrapper):
 
-    assert max_episode_steps is None
+    def get_snapshot(self):
+        self.env.close()          # terminate popup rendering window
+        return dumps(self.env)
 
-    return env
+    def load_snapshot(self, snapshot):
+        assert not hasattr(self, "_monitor") or hasattr(self.env, "_monitor"), "can't backtrack while recording"
+        self.env.close()
+        self.env = loads(snapshot)
 
-
-def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False, scale=False):
-    """Configure environment for DeepMind-style Atari.
-    """
-    if episode_life:
-        env = EpisodicLifeEnv(env)
-    if 'FIRE' in env.unwrapped.get_action_meanings():
-        env = FireResetEnv(env)
-    env = WarpFrame(env)
-    # env = PreProcessFrame(env)
-    if scale:
-        env = ScaledFloatFrame(env)
-    if clip_rewards:
-        env = ClipRewardEnv(env)
-    if frame_stack:
-        env = FrameStack(env, 3)
-    return env
+    def get_result(self, snapshot, action):
+        self.load_snapshot(snapshot)
+        obs, r, done, info = self.step(action)
+        new_snapshot = self.get_snapshot()
+        return ActionResult(new_snapshot, obs, r, done, info)
 
 
 class ImageToPyTorch(gym.ObservationWrapper):
     """
     Image shape to channels x weight x height
     """
-
     def __init__(self, env):
         super(ImageToPyTorch, self).__init__(env)
         old_shape = self.observation_space.shape
@@ -367,5 +334,62 @@ class ImageToPyTorch(gym.ObservationWrapper):
         return np.transpose(observation, axes=(2, 0, 1))
 
 
-def wrap_pytorch(env):
-    return ImageToPyTorch(env)
+class MetricsCapture(gym.Wrapper):
+    def __init__(self, env):
+        gym.Wrapper.__init__(self, env)
+        self.episode_reward = 0
+        self.episode_steps = 0
+        self.total_reward = 0
+        self.total_steps = 0
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+
+        self.episode_reward += reward
+        self.episode_steps += 1
+
+        if done:
+            assert self.total_reward == 0 and self.total_steps == 0
+            self.total_reward = self.episode_reward
+            self.total_steps = self.episode_steps
+            self.episode_reward = 0
+            self.episode_steps = 0
+
+        return obs, reward, done, info
+
+    def get_episode_metrics(self):
+        rewards = self.total_reward
+        steps = self.total_steps
+        self.total_reward = 0
+        self.total_steps = 0
+        return rewards, steps
+
+
+def make_atari(env_id, seed, clip_rewards=True, frames_skipped=4):
+    env = gym.make(env_id)
+
+    np.random.seed(seed)
+    cv2.setRNGSeed(0)
+    env.seed(seed)
+    env.action_space.seed(seed)
+
+    # env = WithSnapshots(env)
+    if 'NoFrameskip' not in env.spec.id:
+        raise Exception("Use Noframeskip env and adjust frameskipping with env wrapper parameter instead")
+    env = MetricsCapture(env)
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=frames_skipped)
+    env = EpisodicLifeEnv(env)
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = WarpFrame(env)
+    if clip_rewards:
+        env = ClipRewardEnv(env)
+    else:
+        print("WARNING - no reward clipping - this may affect overall performance")
+    env = FrameStack(env, 4)
+    env = ImageToPyTorch(env)
+
+    return env
+
+

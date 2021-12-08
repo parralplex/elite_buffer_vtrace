@@ -131,3 +131,4 @@ dmypy.json
 # project folders
 results
 .idea
+/tests/temp/

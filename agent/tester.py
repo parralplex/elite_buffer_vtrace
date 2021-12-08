@@ -1,6 +1,5 @@
 import gym
 import torch
-import torch.nn.functional as F
 from model.network import ModelNetwork
 
 
@@ -18,8 +17,8 @@ class Tester(object):
         else:
             print("CUDA IS NOT AVAILABLE")
         self.env = gym.make(self.flags.env)
-        self.model = ModelNetwork(self.env.action_space.n).to(self.device).eval()
-        loaded_dict = torch.load(model_save_uri)
+        self.model = ModelNetwork(self.env.action_space.n, self.flags).to(self.device).eval()
+        loaded_dict = torch.load(model_save_uri, map_location=self.device)
         if loaded_dict is not dict or 'model_state_dict' not in loaded_dict.keys():
             raise UnSupportedFormatError("Format of the loaded model to test is not supported")
         self.model.load_state_dict(loaded_dict['model_state_dict'])
@@ -32,10 +31,9 @@ class Tester(object):
         total_rew = 0
 
         while self.ep_counter < self.test_ep_count:
-            logits, _ = self.model(observation, no_feature_vec=True)
+            logits, _ = self.model(observation)
 
-            prob = F.softmax(logits, dim=-1)
-            action = prob.multinomial(num_samples=1).detach()
+            action = torch.argmax(logits, dim=1)
 
             observation, reward, done, _ = self.env.step(action)
             reward_ep += reward

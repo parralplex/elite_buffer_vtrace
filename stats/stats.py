@@ -2,6 +2,7 @@ import os
 import signal
 import sys
 import time
+import torch
 
 import numpy as np
 import datetime as dt
@@ -10,6 +11,7 @@ from queue import Queue
 from stats.data_plotter import set_global_chart_settings, create_chart
 from stats.safe_file_writer import SafeOrderedMultiFileWriter
 from utils import logger
+import torch.multiprocessing as mp
 
 
 stat_file_names = ["Scores.txt", "Train_time.txt", "Episode_steps.txt", "Loss_file.txt",
@@ -41,8 +43,10 @@ class Statistics(object):
         self.optimizer_str_desc = optimizer_str_desc
         self.scheduler_str_desc = scheduler_str_desc
         self.max_avg_rew_with_dev_time = None
+        self.warm_up_period_event = torch.multiprocessing.Event()
         signal.signal(signal.SIGTERM, self.on_critical_state_save)
         signal.signal(signal.SIGINT, self.on_critical_state_save)
+        signal.signal(signal.SIGABRT, self.on_critical_state_save)
 
     @staticmethod
     def _generate_file_urls(names, path):
@@ -61,8 +65,16 @@ class Statistics(object):
         self.worker_rollout_counter += 1
         self.episodes += len(rewards)
 
-        self.file_writer.write(rewards, 0)  # score_file
-        self.file_writer.write(ep_steps, 2) # ep_step_file
+        if self.episodes >= 1 and not self.warm_up_period_event.is_set():
+            self.warm_up_period_event.set()
+            self.mark_warm_up_period()
+
+        if self.episodes % 10 == 0:
+            if time.time() - self.START_TIME.timestamp() >= self.flags.training_seconds:
+                self.stop_event.set()
+
+        self.file_writer.write([str(rewards[i]) + ',' + str(self.train_iter_counter * self.flags.batch_size * self.flags.r_f_steps) for i in range(len(rewards))], 0)  # score_file
+        self.file_writer.write([str(ep_steps[i]) + ',' + str(self.train_iter_counter * self.flags.batch_size * self.flags.r_f_steps) for i in range(len(ep_steps))], 2) # ep_step_file
 
         if len(rewards) > 0:
             local_max_reward = np.max(rewards)
@@ -70,6 +82,11 @@ class Statistics(object):
                 self.max_reward = local_max_reward
 
             self.file_writer.write([self.max_reward for _ in range(len(rewards))], 5)
+
+        for k in range(len(rewards)):
+            if self.score_queue.full():
+                self.score_queue.get()
+            self.score_queue.put(rewards[k])
 
         new_max_rew = False
         rew_avg = -sys.maxsize
@@ -90,22 +107,17 @@ class Statistics(object):
         if len(rewards) > 0:
             self.file_writer.write([str(len(rewards)) + ',' + str(dt.datetime.now() - self.START_TIME) + ',' + str((dt.datetime.now() - self.START_TIME).total_seconds()) + "," + str(self.train_iter_counter)], 1)
         if self.verbose:
-            self._verbose_process_rollout(rewards, new_max_rew, rew_avg)
+            self._verbose_process_rollout(new_max_rew, rew_avg)
         if self.episodes >= self.flags.max_episodes:
             self.stop_event.set()
 
-    def _verbose_process_rollout(self, rewards, new_max_rew, rew_avg):
-        for k in range(len(rewards)):
-            if self.score_queue.full():
-                self.score_queue.get()
-            self.score_queue.put(rewards[k])
-
+    def _verbose_process_rollout(self, new_max_rew, rew_avg):
         if new_max_rew:
             print("New MAX avg rew per 100/ep: ", "{:.2f}".format(self.max_avg_reward))
 
         if self.worker_rollout_counter % self.flags.verbose_worker_out_int == 0:
             print('Episode ', self.episodes, '  Iteration: ', self.worker_rollout_counter, "  Avg(100)rew: ",
-                  "{:.2f}".format(rew_avg), " Train iter: ", self.train_iter_counter)
+                  "{:.2f}".format(rew_avg), " Time_steps: ", self.train_iter_counter * self.flags.batch_size * self.flags.r_f_steps)
 
     def change_batch_size(self, new_batch_size):
         self.dyn_batch_size = new_batch_size
@@ -150,30 +162,36 @@ class Statistics(object):
         stats_file_desc.write("Scheduler: " + self.scheduler_str_desc + '\n')
         stats_file_desc.flush()
         stats_file_desc.close()
-        self._create_charts()
 
-    def _create_charts(self):
-        avg_buf_size = self.episodes * 0.001
-        ignore_period = avg_buf_size / 2
-        if avg_buf_size <= 1:
-            avg_buf_size = 10
-            ignore_period = 1
-        if not os.path.exists(self.file_save_dir_url + "/Charts"):
-            os.mkdir(self.file_save_dir_url + "/Charts")
-        set_global_chart_settings()
-        create_chart(self.file_save_dir_url, stat_file_names[0], 'Episodes', 'Reward per episode', ["Avg(" + str(avg_buf_size) + ")"], "reward_chart.png", avg_buf_size)
-        create_chart(self.file_save_dir_url, stat_file_names[2], 'Episodes', 'Steps per episode', ["Avg(" + str(avg_buf_size) + ")"],
-                     "episode_steps_chart.png", avg_buf_size)
-        create_chart(self.file_save_dir_url, stat_file_names[5], 'Episodes', 'Avg Max reward', ["Avg(" + str(avg_buf_size) + ")max reward"],
-                     "max_avg_reward_chart.png", avg_buf_size)
-        create_chart(self.file_save_dir_url, stat_file_names[5], 'Episodes', 'Max reward', ["max reward"],
-                     "max_reward_chart.png", avg_buf_size, False)
-        create_chart(self.file_save_dir_url, stat_file_names[3], 'Training iteration', 'Loss',
-                     ["policy", "baseline", "entropy", "total"],
-                     "loss_chart.png", avg_buf_size, ignore_period)
-        create_chart(self.file_save_dir_url, stat_file_names[4], 'Training iteration', 'Learning rate decay',
-                     ["Avg(" + str(avg_buf_size) + ")"],
-                     "lr_decay_chart.png", avg_buf_size)
+        process = mp.Process(target=_create_charts, args=(self.file_save_dir_url, stat_file_names))
+        process.start()
+        process.join()
 
     def on_critical_state_save(self, *args):
         self.stop_event.set()
+        if args[0] == signal.SIGABRT:
+            logger.warning("Program execution aborted by OS - Possible reason: unable to allocate more virtual/physical memory.")
+
+
+def _create_charts(file_save_dir_url, stat_f_names):
+    avg_buf_size = 1000
+    ignore_period = max(int(avg_buf_size / 2), 100)
+    if not os.path.exists(file_save_dir_url + "/Charts"):
+        os.mkdir(file_save_dir_url + "/Charts")
+    set_global_chart_settings()
+    # create_chart(file_save_dir_url, stat_f_names[0], 'Episodes', 'Reward per episode',
+    #              ["Avg(" + str(avg_buf_size) + ")"], "reward_chart.png", avg_buf_size)
+    # create_chart(file_save_dir_url, stat_f_names[2], 'Episodes', 'Steps per episode',
+    #              ["Avg(" + str(avg_buf_size) + ")"],
+    #              "episode_steps_chart.png", avg_buf_size)
+    create_chart(file_save_dir_url, stat_f_names[5], 'Episodes', 'Avg Max reward',
+                 ["Avg(" + str(avg_buf_size) + ")max reward"],
+                 "max_avg_reward_chart.png", avg_buf_size)
+    create_chart(file_save_dir_url, stat_f_names[5], 'Episodes', 'Max reward', ["max reward"],
+                 "max_reward_chart.png", avg_buf_size, False)
+    create_chart(file_save_dir_url, stat_f_names[3], 'Training iteration', 'Loss',
+                 ["policy", "baseline", "entropy", "total"],
+                 "loss_chart.png", avg_buf_size, ignore_period)
+    create_chart(file_save_dir_url, stat_f_names[4], 'Training iteration', 'Learning rate decay',
+                 ["Avg(" + str(avg_buf_size) + ")"],
+                 "lr_decay_chart.png", avg_buf_size)

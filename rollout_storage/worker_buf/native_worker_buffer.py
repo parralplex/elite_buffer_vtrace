@@ -11,3 +11,4 @@ class NativeWorkerBuffer(WorkerBufferBase):
         self.values = [None] * self.flags.r_f_steps
         self.not_done = [bool] * self.flags.r_f_steps
         self.feature_vec = [None] * self.flags.r_f_steps
+

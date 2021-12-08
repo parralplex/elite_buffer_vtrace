@@ -32,19 +32,23 @@ class TestStats(unittest.TestCase):
         self.stats.file_writer.close()
         with open("temp/Scores.txt") as file:
             for line in file:
-                total_end_rew += float(line.rstrip('\n'))
+                total_end_rew += float(line.split(',')[0])
         with open("temp/Episode_steps.txt") as file:
             for line in file:
-                total_end_steps += int(line.rstrip('\n'))
+                total_end_steps += int(line.split(',')[0])
 
         self.assertEqual(total_start_rew, total_end_rew, 'total sum of rewards is not the same')
         self.assertEqual(total_start_steps, total_end_steps, 'total sum of episode_steps is not the same')
 
     def test_processing_unequal_data_length(self):
         start_rew = [10.1, 5, 7, 6.3, 7, 6, 6, 8]
+        start_ep_steps_good = [4, 5, 6, 6.3, 7, 7, 6, 11]
         start_ep_steps = [0, 5, 4.5]
+
+        self.stats.process_worker_rollout(start_rew, start_ep_steps_good)
 
         with self.assertRaises(ValueError):
             self.stats.process_worker_rollout(start_rew, start_ep_steps)
+        self.stats.file_writer.close()
 
 
