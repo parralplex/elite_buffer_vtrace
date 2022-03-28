@@ -7,6 +7,5 @@ class KeepLatestStrategy(ReplayFillQueueStrategy):
         if replay_queue.full():
             replay_queue.get()
             replay_queue.task_done()
-            # print("DISCARDING")
         replay_queue.put(input_data)
 

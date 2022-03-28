@@ -25,6 +25,7 @@
 # and slightly modified.
 
 import numpy as np
+import torch
 from collections import deque
 import gym
 from gym import spaces
@@ -123,12 +124,13 @@ class EpisodicLifeEnv(gym.Wrapper):
 
 
 class MaxAndSkipEnv(gym.Wrapper):
-    def __init__(self, env, skip=4):
+    def __init__(self, env, render, skip=4):
         """Return only every `skip`-th frame"""
         gym.Wrapper.__init__(self, env)
         # most recent raw observations (for max pooling across time steps)
         self._obs_buffer = np.zeros((2,)+env.observation_space.shape, dtype=np.uint8)
         self._skip       = skip
+        self.render = render
 
     def step(self, action):
         """Repeat action, sum reward, and max over last observations."""
@@ -139,6 +141,8 @@ class MaxAndSkipEnv(gym.Wrapper):
             if i == self._skip - 2: self._obs_buffer[0] = obs
             if i == self._skip - 1: self._obs_buffer[1] = obs
             total_reward += reward
+            if self.render:
+                self.env.render()
             if done:
                 break
         # Note that the observation on the done=True frame
@@ -152,12 +156,22 @@ class MaxAndSkipEnv(gym.Wrapper):
 
 
 class ClipRewardEnv(gym.RewardWrapper):
-    def __init__(self, env):
+    def __init__(self, env, clipping_method):
         gym.RewardWrapper.__init__(self, env)
+        self.clipping_method = clipping_method
 
     def reward(self, reward):
-        """Bin reward to {+1, 0, -1} by its sign."""
-        return np.sign(reward)
+        if self.clipping_method == "abs_one_sign":
+            clipped_reward = np.sign(reward)
+        elif self.clipping_method == "abs_one_clamp":
+            clipped_reward = torch.clamp(reward, -1, 1)
+        elif self.clipping_method == "soft_asymmetric":
+            squeezed = torch.tanh(reward / 5.0)
+            clipped_reward = torch.where(reward < 0, 0.3 * squeezed, squeezed) * 5.0
+        else:
+            raise Exception("Unknown clipping method used " + str(self.clipping_method))
+
+        return clipped_reward
 
 
 class WarpFrame(gym.ObservationWrapper):
@@ -365,7 +379,7 @@ class MetricsCapture(gym.Wrapper):
         return rewards, steps
 
 
-def make_atari(env_id, seed, clip_rewards=True, frames_skipped=4):
+def make_atari(env_id, seed, flags):
     env = gym.make(env_id)
 
     np.random.seed(seed)
@@ -375,21 +389,43 @@ def make_atari(env_id, seed, clip_rewards=True, frames_skipped=4):
 
     # env = WithSnapshots(env)
     if 'NoFrameskip' not in env.spec.id:
-        raise Exception("Use Noframeskip env and adjust frameskipping with env wrapper parameter instead")
+        raise Exception("Use 'Noframeskip' env and adjust frameskipping with env wrapper parameter instead")
     env = MetricsCapture(env)
-    env = NoopResetEnv(env, noop_max=30)
-    env = MaxAndSkipEnv(env, skip=frames_skipped)
-    env = EpisodicLifeEnv(env)
+    env = NoopResetEnv(env, noop_max=flags.noop_threshold)
+    env = MaxAndSkipEnv(env, False, skip=flags.skipped_frames)
+    if flags.episodic_life:
+        env = EpisodicLifeEnv(env)
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
-    env = WarpFrame(env)
-    if clip_rewards:
-        env = ClipRewardEnv(env)
+    env = WarpFrame(env, width=flags.frame_scale_resolution[0], height=flags.frame_scale_resolution[1], grayscale=flags.grayscaling_frames)
+    if flags.clip_rewards:
+        env = ClipRewardEnv(env, flags.reward_clipping_method)
     else:
         print("WARNING - no reward clipping - this may affect overall performance")
-    env = FrameStack(env, 4)
+    env = FrameStack(env, flags.frames_stacked)
     env = ImageToPyTorch(env)
 
+    return env
+
+
+def make_stock_atari(env_id):
+    env = gym.make(env_id)
+    env = WarpFrame(env, width=84, height=84, grayscale=True)
+    env = FrameStack(env, 4)
+    env = ImageToPyTorch(env)
+    return env
+
+
+def make_test_atari(env_id, flags):
+    env = gym.make(env_id)
+    if 'NoFrameskip' not in env.spec.id:
+        raise Exception("Use 'Noframeskip' env and adjust frameskipping with env wrapper parameter instead")
+    env = MaxAndSkipEnv(env, flags.render, skip=flags.skipped_frames)
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = WarpFrame(env, width=flags.frame_scale_resolution[0], height=flags.frame_scale_resolution[1], grayscale=flags.grayscaling_frames)
+    env = FrameStack(env, flags.frames_stacked)
+    env = ImageToPyTorch(env)
     return env
 
 

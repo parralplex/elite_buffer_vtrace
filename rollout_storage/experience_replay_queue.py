@@ -5,11 +5,13 @@ from queue import Queue
 
 
 class ReplayQueue(ReplayBase):
-    def __init__(self, flags, training_event):
+    def __init__(self, flags, training_event, replay_dict):
         super().__init__()
         self.flags = flags
-        self.replay_data_ratio = self.flags.replay_queue_ratio
-        self.input_queue = Queue(maxsize=self.flags.batch_size)
+        self.replay_dict = replay_dict
+        self.replay_capacity = self.replay_dict["capacity"]
+        self.replay_sample_ratio = self.replay_dict["sample_ratio"]
+        self.input_queue = Queue(maxsize=self.replay_capacity)
         self.training_started = False
         self.training_event = training_event
 
@@ -19,6 +21,7 @@ class ReplayQueue(ReplayBase):
         if not self.training_event.is_set() and self.input_queue.full():
             self.input_queue.get()
             self.input_queue.task_done()
+
         if self.flags.reproducible:
             self.input_queue.put(kwargs['data'], timeout=0.5)
         else:
@@ -32,9 +35,7 @@ class ReplayQueue(ReplayBase):
 
         data_batch = []
 
-        for i in range(int(batch_size * self.replay_data_ratio)):
-            if self.input_queue.empty():
-                dd = 0
+        for i in range(int(batch_size * self.replay_sample_ratio)):
             data_part = self.input_queue.get()
             self.input_queue.task_done()
             if data_part is None:

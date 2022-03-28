@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from utils import compress, decompress
+from utils.compression import compress, decompress
 
 
 class TestCompression(unittest.TestCase):

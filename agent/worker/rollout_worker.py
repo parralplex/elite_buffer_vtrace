@@ -9,14 +9,15 @@ from wrappers import atari_wrappers
 
 from rollout_storage.worker_buf.torch_worker_buffer import TorchWorkerBuffer
 from queue import Queue
-from model.network import ModelNetwork, StateTransformationNetwork
+from model.network import ModelNetwork
 
 
 class RolloutWorker(object):
-    def __init__(self, worker_id, flags, state_transf_model, file_save_url, verbose=False):
+    def __init__(self, worker_id, flags, file_save_url, verbose=False):
         self.device = torch.device("cpu")
         self.verbose = verbose
         self.flags = flags
+
         self.seed = flags.seed + worker_id * flags.envs_per_worker
         if flags.reproducible:
             if torch.cuda.is_available():
@@ -30,10 +31,10 @@ class RolloutWorker(object):
         torch.cuda.manual_seed(self.seed)
         torch.cuda.manual_seed_all(self.seed)
         torch.manual_seed(self.seed)
-        np.random.seed(self.seed)  # Beware random generation is NOT THREAD-SAFE !!
+        np.random.seed(self.seed)
         random.seed(self.seed)
 
-        self.model = ModelNetwork(flags.actions_count, flags).eval()
+        self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).eval()
 
         if self.flags.op_mode == "train_w_load":
             state_dict = torch.load(file_save_url, map_location=self.device)
@@ -50,12 +51,8 @@ class RolloutWorker(object):
 
         self.iteration_counter = 0
 
-        self.state_transf_network = StateTransformationNetwork(self.flags)
-        self.state_transf_network.load_state_dict(state_transf_model)
-        self.all_states = torch.zeros(flags.envs_per_worker, self.flags.r_f_steps, *self.flags.observation_shape)
-
         for i in range(flags.envs_per_worker):
-            env = atari_wrappers.make_atari(flags.env, self.seed + i, clip_rewards=self.flags.clip_rewards, frames_skipped=self.flags.skipped_frames)
+            env = atari_wrappers.make_atari(flags.env, self.seed + i, self.flags)
 
             self.workers_envs.append(env)
             self.workers_buffers.append(TorchWorkerBuffer((self.feature_vec_dim,), flags))
@@ -65,7 +62,6 @@ class RolloutWorker(object):
 
     def load_model(self, new_weights):
         self.model.load_state_dict(new_weights)
-        self.model.eval()
 
     def exec_and_eval_rollout(self):
         iteration_rewards = []
@@ -75,16 +71,16 @@ class RolloutWorker(object):
         for i in range(len(self.workers_envs)):
             self.workers_buffers[i].reset()
             self.workers_buffers[i].states[0] = self.observations[i]
-            self.all_states[i][0] = self.observations[i]
 
         for step in range(self.flags.r_f_steps):
             with torch.no_grad():
-                logits, _ = self.model(self.observations)
+                logits, values, feature_vecs = self.model(self.observations, features=True)
 
                 probs = F.softmax(logits, dim=-1)
                 actions = probs.multinomial(num_samples=1)
 
             self.observations = []
+
             for i in range(len(self.workers_envs)):
                 new_state, reward, terminal, _ = self.workers_envs[i].step(actions[i].item())
 
@@ -106,19 +102,12 @@ class RolloutWorker(object):
                 self.workers_buffers[i].insert(new_state, torch.from_numpy(np.array([[actions[i].item()]])),
                                                torch.from_numpy(np.array([[reward]])).float(),
                                                logits[i],
-                                               not terminal)
-                if self.flags.use_elite_set:
-                    if step < (self.flags.r_f_steps - 1):
-                        self.all_states[i][step + 1] = new_state
+                                               not terminal,
+                                               values[i],
+                                               feature_vecs[i])
+
                 self.observations.append(new_state)
             self.observations = torch.stack(self.observations)
-
-        if self.flags.use_elite_set:
-            with torch.no_grad():
-                feature_vecs = self.state_transf_network(self.all_states)
-
-            for i in range(len(self.workers_envs)):
-                self.workers_buffers[i].feature_vec = feature_vecs[i]
 
         if self.verbose:
             avg_rew = np.average(list(self.episode_rewards.queue))
@@ -130,3 +119,4 @@ class RolloutWorker(object):
                 print('Worker: ' + str(self.worker_id) + '  LocalWorkerIteration: ', self.iteration_counter, " Avg(100)rew: ", "{:.2f}".format(avg_rew))
 
         return self.workers_buffers, self.worker_id, iteration_rewards, iteration_ep_steps
+

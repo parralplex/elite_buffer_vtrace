@@ -1,13 +1,11 @@
 import time
 
 from agent.manager.abstract.native_manager import NativeManager
-from model.network import StateTransformationNetwork
 from stats.prof_timer import Timer
-from utils import logger
 from queue import Queue
 from agent.worker.native_rollout_worker import start_worker_sync
 import torch.multiprocessing as mp
-from torch.multiprocessing import  Event, Barrier
+from torch.multiprocessing import Event, Barrier
 
 
 class NativeManagerSync(NativeManager):
@@ -15,10 +13,9 @@ class NativeManagerSync(NativeManager):
         super().__init__(stop_event, training_event, replay_writer, replay_buffers, model, stats, flags, file_save_url)
         self.model_loaded_event = Event()
         self.worker_sync_barrier = Barrier(flags.worker_count)
-        self.state_transf_network = StateTransformationNetwork(self.flags)
         for i in range(flags.worker_count):
             process = mp.Process(target=start_worker_sync, args=(
-            i, self.worker_data_queue, self.shared_list, flags, self.model_loaded_event, self.worker_sync_barrier, self.state_transf_network.state_dict(), file_save_url, verbose))
+            i, self.worker_data_queue, self.shared_list, flags, self.model_loaded_event, self.worker_sync_barrier, file_save_url, verbose))
             process.start()
             self.workers.append(process)
         self.expected_worker_id = 0

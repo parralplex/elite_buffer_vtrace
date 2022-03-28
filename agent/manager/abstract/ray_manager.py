@@ -1,8 +1,9 @@
 import ray
 
+from ray.exceptions import RayActorError
+from utils.logger import logger
 from agent.worker.ray_rollout_worker import RayRolloutWorker
 from agent.manager.abstract.worker_manager_base import WorkerManagerBase
-from model.network import StateTransformationNetwork
 from queue import Queue
 
 
@@ -16,10 +17,8 @@ class RayManager(WorkerManagerBase):
                 ray.init()
         self.workers = []
 
-        self.state_transf_network = StateTransformationNetwork(self.flags)
-
         for i in range(flags.worker_count):
-            self.workers.append(RayRolloutWorker.remote(i, flags, self.state_transf_network.state_dict(), file_save_url, verbose))
+            self.workers.append(RayRolloutWorker.remote(i, flags, file_save_url, verbose))
 
         self.done_ref = None
         self.rollouts = []
@@ -34,7 +33,10 @@ class RayManager(WorkerManagerBase):
             self.active_worker_indices.put(i)
 
     def plan_and_execute_workers(self):
-        worker_handler = ray.get(self.done_ref)
+        try:
+            worker_handler = ray.get(self.done_ref)
+        except RayActorError as exp:
+            logger.exception("Worker execution interrupted by exception: " + str(exp))
 
         workers_data = []
         for j in range(len(self.done_ref)):

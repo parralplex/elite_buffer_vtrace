@@ -1,4 +1,6 @@
 import time
+import signal
+from utils.logger import logger
 from queue import Queue, Empty, Full
 from threading import Thread
 
@@ -32,7 +34,11 @@ class ReplayWriterQueue:
                 worker_data = self.queue.get(timeout=2)
             except Empty:
                 continue
-            self._write_to_replay(worker_data)
+            try:
+                self._write_to_replay(worker_data)
+            except Exception as exp:
+                logger.exception("Replay writer has raised an exception:" + str(exp))
+                signal.raise_signal(signal.SIGINT)
             self.queue.task_done()
             if self.stop_event.is_set():
                 self.finished = True

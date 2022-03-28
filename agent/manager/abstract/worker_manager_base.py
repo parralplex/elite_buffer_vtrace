@@ -1,7 +1,7 @@
 import abc
-
+import signal
 from stats.prof_timer import Timer
-from utils import logger
+from utils.logger import logger
 
 
 class WorkerManagerBase(metaclass=abc.ABCMeta):
@@ -53,12 +53,14 @@ class WorkerManagerBase(metaclass=abc.ABCMeta):
 
                 if self.flags.reproducible and self.training_event.is_set():
                     for p in range(len(self.replay_buffers)):
-                        self.replay_buffers[p].cache(1, True)
+                        self.replay_buffers[p].cache(self.flags.cache_sample_size, True)
                     if not first_caching:
                         first_caching = True
-        except:
+        except Exception as exp:
+            logger.exception("Manager thread exception: " + str(exp))
+            signal.raise_signal(signal.SIGINT)
             if not self.flags.reproducible:
-                logger.exception("Worker manager thread raise new exception - ending execution")
+                logger.exception("Worker manager thread raised new exception - ending execution")
                 self.stop_event.set()
                 self.clean_up()
                 for p in range(len(self.replay_buffers)):

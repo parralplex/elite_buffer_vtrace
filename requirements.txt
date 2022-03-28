@@ -6,3 +6,5 @@ lz4==3.1.10
 gym==0.21.0
 scikit-learn==0.24.2
 psutil==5.8.0
+pynvml~=11.4.1
+schema~=0.7.5

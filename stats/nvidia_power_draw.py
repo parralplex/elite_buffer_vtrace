@@ -1,7 +1,7 @@
 from pynvml import *
 import subprocess
 from threading import Thread, Event
-from utils import logger
+from utils.logger import logger
 
 
 class PowerDrawAgent:

@@ -1,14 +1,15 @@
-import gym
+import numpy as np
 import torch
+from utils.logger import logger
+from wrappers import atari_wrappers
 from model.network import ModelNetwork
-
-
-class UnSupportedFormatError(Exception):
-    pass
+from setuptools_scm import get_version
+from option_flags import change_args
+from queue import Queue
 
 
 class Tester(object):
-    def __init__(self, test_ep_count, model_save_uri, flags):
+    def __init__(self, test_ep_count, model_save_url, flags):
         self.flags = flags
         self.test_ep_count = test_ep_count
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -16,34 +17,59 @@ class Tester(object):
             print("Tester is using CUDA")
         else:
             print("CUDA IS NOT AVAILABLE")
-        self.env = gym.make(self.flags.env)
-        self.model = ModelNetwork(self.env.action_space.n, self.flags).to(self.device).eval()
-        loaded_dict = torch.load(model_save_uri, map_location=self.device)
-        if loaded_dict is not dict or 'model_state_dict' not in loaded_dict.keys():
-            raise UnSupportedFormatError("Format of the loaded model to test is not supported")
-        self.model.load_state_dict(loaded_dict['model_state_dict'])
+        self.env = atari_wrappers.make_test_atari(self.flags.env, self.flags)
+        self.model = None
+        self.episodic_rewards = Queue()
+        self.episodic_steps = Queue()
+        try:
+            self._load_model_state(model_save_url, self.device)
+        except Exception as exp:
+            logger.exception("Loaded model is probably not compatible with your network architecture from model/network. " + str(exp))
+            raise exp
+
         self.ep_counter = 0
 
-    def test(self, render=False):
+    def test(self):
         self.ep_counter = 0
-        observation = self.env.reset()
+        observation = torch.from_numpy(self.env.reset()).float().unsqueeze(0).to(self.device)
         reward_ep = 0
-        total_rew = 0
+        steps = 0
 
         while self.ep_counter < self.test_ep_count:
-            logits, _ = self.model(observation)
-
+            logits, _, _ = self.model(observation)
             action = torch.argmax(logits, dim=1)
 
             observation, reward, done, _ = self.env.step(action)
             reward_ep += reward
+            steps += 1
             if done:
                 self.ep_counter += 1
                 print("Episode: ", self.ep_counter, " Reward: ", reward_ep)
-                total_rew += reward_ep
+                self.episodic_rewards.put(reward_ep)
+                self.episodic_steps.put(steps)
                 reward_ep = 0
+                steps = 0
                 observation = self.env.reset()
-            if render:
-                self.env.render()
+            observation = torch.from_numpy(observation).float().unsqueeze(0).to(self.device)
         self.env.close()
-        return total_rew
+        avg_reward = np.average(self.episodic_rewards.queue)
+        avg_steps = np.average(self.episodic_steps.queue)
+        return avg_reward, avg_steps
+
+    def _load_model_state(self, url, device):
+        try:
+            state_dict = torch.load(url + '/checkpoint_data_save.pt', map_location=device)
+            self.flags = state_dict["flags"]
+            self.model = torch.jit.load(url + '/agent_model_scripted_save.pt').to(device).eval()
+        except Exception as exp:
+            logger.warning("Error loading model. ")
+            state_dict = torch.load(url + '/regular_model_save_.pt', map_location=device)
+            self.flags = change_args(**state_dict["flags"])
+            self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).to(device).eval()
+            self.model.load_state_dict(state_dict["model_state_dict"])
+
+        try:
+            if get_version() != state_dict["project_version"]:
+                logger.warning("Loaded model and project have mismatched versions - project_version:" + get_version() + "  loaded_model_version:" + state_dict["project_version"])
+        except Exception as exp:
+            logger.warning("We were unable to verify save VERSION - this may cause problems.")

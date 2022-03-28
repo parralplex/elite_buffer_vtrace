@@ -2,16 +2,13 @@ from agent.manager.abstract.native_manager import NativeManager
 from agent.worker.native_rollout_worker import start_worker_async
 import torch.multiprocessing as mp
 
-from model.network import StateTransformationNetwork
-
 
 class NativeManagerAsync(NativeManager):
     def __init__(self, stop_event, training_event, replay_writer, replay_buffers, model, stats, flags, file_save_url, verbose=False):
         super().__init__(stop_event, training_event, replay_writer, replay_buffers, model, stats, flags, file_save_url)
-        self.state_transf_network = StateTransformationNetwork(self.flags)
         for i in range(flags.worker_count):
             process = mp.Process(target=start_worker_async, args=(
-            i, self.worker_data_queue, self.shared_list, flags, self.state_transf_network.state_dict(), file_save_url, verbose))
+            i, self.worker_data_queue, self.shared_list, flags, file_save_url, verbose))
             process.start()
             self.workers.append(process)
 

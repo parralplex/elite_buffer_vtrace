@@ -5,8 +5,8 @@ from queue import Full
 # in python multiprocessing processes can be run only on global functions not class methods (class cannot be pickled and sent to process)
 
 
-def start_worker_sync(id, queue, shared_list, flags, model_loaded_event, sync_barrier, state_transf_model, file_save_url, verbose=False):
-    rollout_worker = RolloutWorker(id, flags, state_transf_model, file_save_url, verbose)
+def start_worker_sync(id, queue, shared_list, flags, model_loaded_event, sync_barrier, file_save_url, verbose=False):
+    rollout_worker = RolloutWorker(id, flags, file_save_url, verbose)
 
     starting = True
     while shared_list[1]:
@@ -33,8 +33,8 @@ def start_worker_sync(id, queue, shared_list, flags, model_loaded_event, sync_ba
     return
 
 
-def start_worker_async(id, queue, shared_list, flags, state_transf_model, file_save_url, verbose=False):
-    rollout_worker = RolloutWorker(id, flags, state_transf_model, file_save_url, verbose)
+def start_worker_async(id, queue, shared_list, flags, file_save_url, verbose=False):
+    rollout_worker = RolloutWorker(id, flags, file_save_url, verbose)
 
     while shared_list[1]:
         try:

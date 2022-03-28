@@ -1,65 +1,71 @@
 import matplotlib.pyplot as plt
-from collections import deque
 import numpy as np
+import os
+
+from collections import deque
+from itertools import zip_longest
 
 
 def set_global_chart_settings():
-    plt.figure(figsize=(10.0, 8.0))
+    plt.rc('axes', titlesize=27)
+    plt.rc('axes', labelsize=27)
+    plt.rc('xtick', labelsize=26)
+    plt.rc('ytick', labelsize=26)
+    plt.rc('legend', fontsize=25)
+    plt.rc('figure', titlesize=27)
 
-    plt.rc('axes', titlesize=20)
-    plt.rc('axes', labelsize=20)
-    plt.rc('xtick', labelsize=12)
-    plt.rc('ytick', labelsize=12)
-    plt.rc('legend', fontsize=12)
-    plt.rc('figure', titlesize=20)
+    plt.rcParams["figure.figsize"] = (13, 8)
 
 
-def create_chart(folder_url, data_file_name, x_label, y_label, curve_labels, chart_file_name, avg_buff_size, calc_avg=True, skip_first_rows=0):
+def create_chart(data_file_name_list, experiment_url_list, x_line_index_list, y_line_index_list, curve_labels_list, x_label, y_label, chart_file_name, avg_buff_size):
     plt.clf()
-    data_file = open(folder_url + "/" + data_file_name, "r")
+    for i in range(len(data_file_name_list)):
+        os.chdir(experiment_url_list[i])
+        root_dir = os.getcwd()
 
-    x = []
-    y = []
-    avg_buff = []
-    first_line = True
-    for i, line in enumerate(data_file):
-        if i < skip_first_rows:
-            continue
-        line_data = line.split(',')
-        line_data[len(line_data) - 1] = line_data[len(line_data) - 1].rstrip('\n')
-        line_sum = 0
-        for j in range(len(line_data)):
-            if first_line:
-                y.append([])
-                avg_buff.append(deque())
-            if calc_avg:
-                avg_buff[j].append(float(line_data[j]))
-                if len(avg_buff[j]) > avg_buff_size:
-                    avg_buff[j].popleft()
-                y[j].append(np.average(avg_buff[j]))
-            else:
-                y[j].append(float(line_data[j]))
-            line_sum += float(line_data[j])
-            if len(line_data) > 1 and j == (len(line_data)-1):
-                if first_line:
-                    y.append([])
-                    avg_buff.append(deque())
-                if calc_avg:
-                    avg_buff[j+1].append(line_sum)
-                    if len(avg_buff[j+1]) > avg_buff_size:
-                        avg_buff[j+1].popleft()
-                    y[j+1].append(np.average(avg_buff[j+1]))
-                else:
-                    y[j + 1].append(line_sum)
-        first_line = False
-        x.append(i)
+        data_files = []
+        data = []
 
-    for i in range(len(y)):
-        st_dv = np.std(y[i])
-        plt.plot(x, y[i], label=curve_labels[i])
-        plt.fill_between(x, y[i]-st_dv, y[i]+st_dv, alpha=0.5)
+        for subdir, dirs, files in os.walk(root_dir):
+            for file in files:
+                filepath = subdir + os.sep + file
+                if filepath.endswith(data_file_name_list[i]):
+                    data_files.append(open(filepath, "r"))
+                    data.append(deque())
+
+        MEAN_THRESHOLD = avg_buff_size
+        scores_file_data = [[[], []] for i in range(len(data))]
+
+        for line_counter, line_data in enumerate(zip_longest(*data_files)):
+            for counter, number in enumerate(line_data):
+                if number is not None:
+                    num = float(number.split(',')[y_line_index_list[i]].rstrip('\n'))
+
+                    data[counter].append(num)
+                    if len(data[counter]) > MEAN_THRESHOLD:
+                        data[counter].popleft()
+
+                    scores_file_data[counter][0].append(float(number.split(',')[x_line_index_list[i]].rstrip('\n')))
+                    scores_file_data[counter][1].append(np.average(data[counter]))
+
+        x_min = min(min(data_file[0]) for data_file in scores_file_data)
+        x_max = max(max(data_file[0]) for data_file in scores_file_data)
+
+        x = np.linspace(x_min, x_max, 200)
+
+        interpolated = [np.interp(x, data_file[0], data_file[1]) for data_file in scores_file_data]
+
+        avg_y = [np.average(y_approximate) for y_approximate in zip(*interpolated)]
+
+        upper_err_y = [np.average(y_approximate) + np.std(y_approximate) for y_approximate in zip(*interpolated)]
+        lower_err_y = [np.average(y_approximate) - np.std(y_approximate) for y_approximate in zip(*interpolated)]
+
+        plt.plot(x, avg_y, label=curve_labels_list[i])
+        plt.fill_between(x, lower_err_y, upper_err_y, alpha=0.15)
 
     plt.xlabel(x_label)
     plt.ylabel(y_label)
+    plt.grid()
+    plt.tight_layout()
     plt.legend()
-    plt.savefig(folder_url + "/Charts/" + chart_file_name, transparent=True)
+    plt.savefig(chart_file_name, transparent=True)

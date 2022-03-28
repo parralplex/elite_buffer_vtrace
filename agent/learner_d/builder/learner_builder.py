@@ -1,9 +1,11 @@
 from agent.learner_d.strategy.learn_async_strategy import LearnAsyncStrategy
 from agent.manager.native_manager_async import NativeManagerAsync
 
-from rollout_storage.elite_set.elite_set_replay import EliteSetReplay
-from rollout_storage.elite_set.strategies.dist_input_filter import DistFilteringInputStrategy
-from rollout_storage.elite_set.strategies.policy_sample import PolicySampleStrategy
+from rollout_storage.custom_replay.custom_replay import CustomReplay
+from rollout_storage.custom_replay.strategies.elite_insertion import EliteInsertStrategy
+from rollout_storage.custom_replay.strategies.elite_sampling import EliteSampleStrategy
+
+from rollout_storage.custom_replay.strategies.attentive_sampling import AttentiveSampleStrategy
 from rollout_storage.experience_replay import ExperienceReplayTorch
 from rollout_storage.experience_replay_proxy import ExperienceReplayProxy
 from rollout_storage.experience_replay_queue import ReplayQueue
@@ -36,32 +38,40 @@ class LearnerBuilder(object):
         self.worker_manager = None
         self.strategy = None
 
-    def add_replay(self, file_save_dir_url, training_event):
-        replay = ReplayQueue(self.flags, training_event)
+    def add_replay(self, file_save_dir_url, training_event, replay_dict):
+        replay = ExperienceReplayTorch(self.flags, training_event, replay_dict)
         replay = ExperienceReplayProxy(replay, file_save_dir_url, self.flags.caching)
         replay.start()
         self.replay_buffers.append(replay)
-        if self.flags.use_replay_buffer:
-            replay = ExperienceReplayTorch(self.flags, training_event)
-            replay = ExperienceReplayProxy(replay, file_save_dir_url, self.flags.caching)
-            replay.start()
-            self.replay_buffers.append(replay)
         return self
 
-    def add_elite(self, feature_vec_dim, file_save_dir_url, training_event):
-        if self.flags.use_elite_set:
-            elite_insert_strategy = None
-            elite_sample_strategy = None
-            if self.flags.elite_insert_strategy == "dist_input_filter":
-                elite_insert_strategy = DistFilteringInputStrategy(self.flags)
+    def add_replay_queue(self, file_save_dir_url, training_event, replay_dict):
+        replay = ReplayQueue(self.flags, training_event, replay_dict)
+        replay = ExperienceReplayProxy(replay, file_save_dir_url, self.flags.caching)
+        replay.start()
+        self.replay_buffers.append(replay)
 
-            if self.flags.elite_sample_strategy == "policy_sample":
-                elite_sample_strategy = PolicySampleStrategy(self.flags)
+    def add_custom_replay(self, file_save_dir_url, training_event, model, device, replay_dict):
+        sampling_strategy = None
+        insertion_strategy = None
+        elite_insert_strategy = None
+        elite_sample_strategy = None
+        if "insert_strategy" in replay_dict.keys():
+            insertion_strategy = replay_dict["insert_strategy"]
+        if "sample_strategy" in replay_dict.keys():
+            sampling_strategy = replay_dict["sample_strategy"]
 
-            elite_set = EliteSetReplay(feature_vec_dim, elite_insert_strategy, elite_sample_strategy, self.flags, file_save_dir_url, training_event)
-            elite_set = ExperienceReplayProxy(elite_set, file_save_dir_url, self.flags.caching)
-            elite_set.start()
-            self.replay_buffers.append(elite_set)
+        if sampling_strategy == "elite_sampling":
+            elite_sample_strategy = EliteSampleStrategy(self.flags, replay_dict["alfa_annealing_factor"], replay_dict["lambda_batch_multiplier"], replay_dict["elite_sampling_strategy"], replay_dict["dist_function"], replay_dict["p"])
+        elif sampling_strategy == "attentive_sampling":
+            elite_sample_strategy = AttentiveSampleStrategy(self.flags, replay_dict["alfa_annealing_factor"], replay_dict["lambda_batch_multiplier"], replay_dict["elite_sampling_strategy"], replay_dict["dist_function"], replay_dict["p"])
+        if insertion_strategy == "elite_insertion":
+            elite_insert_strategy = EliteInsertStrategy(self.flags, replay_dict["elite_batch_size"], replay_dict["dist_function"], replay_dict["p"])
+
+        elite_set = CustomReplay(elite_insert_strategy, elite_sample_strategy, self.flags, file_save_dir_url, training_event, model, device, replay_dict)
+        elite_set = ExperienceReplayProxy(elite_set, file_save_dir_url, self.flags.caching)
+        elite_set.start()
+        self.replay_buffers.append(elite_set)
         return self
 
     def create_replay_writer(self, stop_event):
@@ -93,6 +103,8 @@ class LearnerBuilder(object):
             self.worker_manager = NativeManagerAsync(stop_event, training_event, self.replay_writer,
                                                 self.replay_buffers, model, stats, self.flags, file_save_dir_url,
                                                 self.flags.worker_verbose)
+        else:
+            raise ForbiddenSetting("Unknown multiprocessing module selected: " + self.flags.multiprocessing_backend)
         return self
 
     def create_strategy(self, stop_event):

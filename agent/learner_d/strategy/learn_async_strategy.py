@@ -1,4 +1,5 @@
 from agent.learner_d.strategy.learn_iter_strategy import LearnIterStrategyBase
+from utils.logger import logger
 
 
 class LearnAsyncStrategy(LearnIterStrategyBase):
@@ -7,7 +8,7 @@ class LearnAsyncStrategy(LearnIterStrategyBase):
 
     def after_batching(self, **kwargs):
         if kwargs['states'].shape[1] != kwargs['current_batch_size']:
-            print(" BAD BATCH SIZE ", kwargs['states'].shape, kwargs['current_batch_size'])
+            logger.exception(" BAD BATCH SIZE ", kwargs['states'].shape, kwargs['current_batch_size'])
             return False
         return True
 

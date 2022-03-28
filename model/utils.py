@@ -39,3 +39,16 @@ def weights_init_xavier(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1 or classname.find('Linear') != -1:
         init.xavier_uniform_(m.weight)
+
+
+def merge_grad(model_a, model_b):
+    list_grad_a = []
+    list_grad_b = []
+    itr = 0
+    for pA, pB in zip(model_a.parameters(), model_b.parameters()):
+        list_grad_a.append(pA)
+        list_grad_b.append(pB)
+        avg = pA.grad + pB.grad
+        pA.grad = avg.clone()
+        pB.grad = avg.clone()
+        itr += 1

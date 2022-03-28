@@ -15,7 +15,7 @@ class LearnSyncStrategy(LearnIterStrategyBase):
         def is_ready_for_processing():
             nonlocal counter
             if counter < self.data_pos_pointer:
-                raise ValueError("COunter cannot be lower that global counter")
+                raise ValueError("Counter cannot be lower that global counter")
             return counter == self.data_pos_pointer
 
         if self.condition_waiters == (self.flags.learner_thread_count - 1):
@@ -33,7 +33,7 @@ class LearnSyncStrategy(LearnIterStrategyBase):
         return True
 
     def before_learning(self):
-        self.data_pos_pointer = (self.data_pos_pointer + 1) % self.flags.max_cache_pos_pointer
+        self.data_pos_pointer = (self.data_pos_pointer + 1) % 1000000
         if self.condition_waiters > 0:
             with self.in_row_condition:
                 self.in_row_condition.notify(1)

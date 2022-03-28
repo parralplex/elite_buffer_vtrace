@@ -1,12 +1,16 @@
 FROM nvidia/cuda:10.2-base-ubuntu18.04
 
-RUN apt-get update && apt-get install -y curl ca-certificates sudo wget unrar
+RUN apt-get update && apt-get install -y curl ca-certificates sudo wget unrar unzip
 RUN rm -rf /var/lib/apt/lists/*   # clear package cache
 
 RUN apt update -yq && apt install -yq cmake
 
+RUN apt-get install ffmpeg libsm6 libxext6  -yq
+
 RUN mkdir /app
 WORKDIR /app
+
+ADD . .
 
 RUN adduser --disabled-password --gecos '' --shell /bin/bash user
 RUN chown -R user:user /app
@@ -23,20 +27,18 @@ RUN curl -sLo ~/miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-py38
  && chmod +x ~/miniconda.sh \
  && ~/miniconda.sh -b -p ~/miniconda \
  && rm ~/miniconda.sh \
- && conda install -y python==3.7.7 \
+ && conda install -y python==3.8.12 \
  && conda clean -ya
 
-RUN conda install -c conda-forge opencv scikit-learn
-RUN conda install pytorch==1.7.1 torchvision==0.8.2 torchaudio==0.7.2 cudatoolkit=10.2 -c pytorch && conda clean -ya
-
-RUN pip install -U ray ray[default] gym gym[atari] lz4 atari_py psutil matplotlib
+RUN pip install --upgrade pip
+RUN pip3 install -r requirements.txt -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html
 
 RUN wget http://www.atarimania.com/roms/Roms.rar
 
 RUN unrar e Roms.rar
 
-RUN python3 -m atari_py.import_roms .
+RUN unzip ROMS.zip
 
-ADD . .
+RUN	ale-import-roms ROMS
 
 CMD ["python3"]

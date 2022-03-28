@@ -9,7 +9,7 @@ import torch.backends.cudnn
 from option_flags import flags
 from agent.learner_d.learner import Learner
 from agent.tester import Tester
-from utils import create_logger, logger
+from utils.logger import create_logger, logger
 
 
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -26,7 +26,7 @@ if __name__ == '__main__':
         save_url = "results/" + flags.env + "_" + str(run_id)
         os.makedirs(save_url)
         create_logger(save_url)
-        logger.info("Starting execution " + str(run_id) + " with order number " + str(j))
+        logger.info("Starting execution " + str(run_id))
 
         if flags.reproducible:
             os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -45,13 +45,13 @@ if __name__ == '__main__':
         try:
             Learner(flags, run_id).start()
         except Exception as e:
-            logger.exception("Learner execution " + str(run_id) + "  interrupted by exception")
+            logger.exception("Learner execution " + str(run_id) + "  interrupted by exception " + str(e))
             raise e
     elif flags.op_mode == "test":
         try:
-            Tester(flags.test_episode_count, flags.load_model_uri, flags).test(flags.render)
+            Tester(flags.test_episode_count, flags.load_model_url, flags).test()
         except Exception as e:
-            logger.exception("Tester execution interrupted by exception")
+            logger.exception("Tester execution interrupted by exception " + str(e))
     else:
         raise NameError(
             "Unknown operation mode selected - please check if the wording of the argument is correct.")

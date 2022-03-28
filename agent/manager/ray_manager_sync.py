@@ -4,7 +4,6 @@ from queue import Queue
 
 from agent.manager.abstract.ray_manager import RayManager
 from stats.prof_timer import Timer
-from utils import logger
 
 
 class RayManagerSync(RayManager):
@@ -37,7 +36,7 @@ class RayManagerSync(RayManager):
         if self.active_worker_indices.qsize() == len(self.workers):
             super(RayManagerSync, self).pre_processing()
         else:
-            raise Exception("Application ahs entered forbidden state - not all workers has finished execution even though return data processing has started!")
+            raise Exception("Application is in forbidden state - not all workers have finished execution even though return data processing has started!")
 
     def update_model_data(self, current_model):
         self.model_update_queue.put({k: v.cpu() for k, v in current_model.state_dict().items()})
