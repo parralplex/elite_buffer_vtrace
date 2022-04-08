@@ -34,11 +34,10 @@ class RolloutWorker(object):
         np.random.seed(self.seed)
         random.seed(self.seed)
 
-        self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).eval()
-
         if self.flags.op_mode == "train_w_load":
-            state_dict = torch.load(file_save_url, map_location=self.device)
-            self.model.load_state_dict(state_dict["model_state_dict"])
+            self.model = torch.jit.load(self.flags.load_model_url + '/agent_model_scripted_save.pt', map_location=self.device).eval()
+        else:
+            self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).eval()
 
         self.feature_vec_dim = self.flags.feature_out_layer_size
         self.worker_id = worker_id

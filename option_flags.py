@@ -9,6 +9,7 @@ parser = argparse.ArgumentParser(description='Distributed RL platform flags')
 # GENERAL
 parser.add_argument("--op_mode", default="train", choices=["train", "test", "train_w_load"], help="Operation mode of the application - training, testing, continue training from checkpoint")
 parser.add_argument("--load_model_url", default="results/pong_23min/model_save_.pt", help="Url of model_checkpoint that should be loaded.")
+parser.add_argument("--load_optimizer_save", default=True, help="Whether optimizer and lr-scheduler state will be loaded from checkpoint save or not")
 parser.add_argument("--save_model_period", type=int, default=1000, help="Model is saved every n-th training updates.")
 parser.add_argument("--debug", type=bool, default=False, help="Determines whether application should be in debug mode.")
 
@@ -25,7 +26,7 @@ parser.add_argument('--seed', type=int, default=randomize_seed)
 parser.add_argument('--reproducible', type=bool, default=False, help="Determines whether the experiment should be reproducible")
 
 # ENVIRONMENT
-env_name = 'BreakoutNoFrameskip-v4'
+env_name = 'AtlantisNoFrameskip-v4'
 parser.add_argument('--env', type=str, default=env_name, help="environment name")
 
 # ALE PREPROCESSING
@@ -53,11 +54,11 @@ parser.add_argument('--observation_shape', type=int, default=(stacked_frames_def
 parser.add_argument('--learner_thread_count', type=int, default=1, help='number of parallel learner threads')
 parser.add_argument('--worker_count', type=int, default=7, help='number of workers working in parallel')
 parser.add_argument('--envs_per_worker', type=int, default=5, help='number of environments per 1 worker')
-parser.add_argument("--multiprocessing_backend", default="python_native", choices=["ray", "python_native"], help="Type of mutiprocessing library used in app.")
+parser.add_argument("--multiprocessing_backend", default="ray", choices=["ray", "python_native"], help="Type of mutiprocessing library used in app.")
 parser.add_argument("--shared_queue_size", type=int, default=4, help="Size of the queue shared by processes to exchange data - only used with python-native multiprocessing module")
 
 # END OF TRAINING CONDITIONS
-parser.add_argument('--environment_max_steps', type=int, default=600000, help='Length of the experiment in steps.')
+parser.add_argument('--environment_max_steps', type=int, default=15000000, help='Length of the experiment in steps.')
 
 # REPLAY BUFFER
 parser.add_argument('--replay_writer_queue_size', type=int, default=1, help='how many worker observations(which are to be written to replay buffer) can be stored before some of them have to discarded to save memory')
@@ -147,6 +148,11 @@ def change_args(**kwargs):
     parser.set_defaults(**kwargs)
     flags = parser.parse_args()
     return flags
+
+
+def set_defaults(**kwargs):
+    parser.set_defaults(**kwargs)
+
 
 
 

@@ -63,28 +63,39 @@ python main.py --op_mode=train \
 #### Continue training from checkpoint
 ```
 python main.py --op_mode=train_w_load \
---env=PongNoFrameskip-v4  \
 --environment_max_steps=1000000 \
 --load_model_url=<path_to_model>
 ```
 #### Test trained agent
 ```
 python main.py --op_mode=test \
---env=PongNoFrameskip-v4  \
 --test_episode_count=1000 \
 --load_model_url=<path_to_model> \
 --render=True
 ```
+Multiple experiments can be executed in sequence using a python loop in file `multi_train.py` or a custom loop in terminal scrip (like bash script) applied on standard application entry point in `main.py`. The order of importance of different application arguments is this:
+1. Standard application arguments (argv[:1])
+2. Additional arguments passed to application from `multi_train.py` with change_args function
+3. Arguments loaded from saved checkpoint file
+4. Default argument values stored inside `option_flags.py`
+
+Values of arguments with higher priority overwrite those with lower priority. 
+
+Another important thing to note, is that each training needs to have at least 1 replay object and total sum
+of the sample_ratios of all used replays must be 1. Sample ratio dictates proportion of samples taken from each replay to form a batch.
+If we don't want to use replay and only want to pass experiences as they are being generated we can use Queue with size 1.
+`replay_parameters='[{"type": "queue", "capacity": 1, "sample_ratio": 1}]'`
+
 ## Todo
 
 - [ ] Multi-learner architecture
 - [ ] Adaptive asynchronous batching (caching)
-- [ ] Additional support of environments like MuJoCo, DeepMind Lab
-- [ ] Further improvements of the V-trace algorithm, i.e., [IMPACT](https://arxiv.org/pdf/1912.00167.pdf)
+- [ ] Support other environment collections like MuJoCo, DeepMind Lab
+- [ ] Implement PPO based distributed algorithm, i.e., [IMPACT](https://arxiv.org/pdf/1912.00167.pdf)
 - [ ] System for saving performance metric values into text files in chunks in periodical intervals
 - [ ] Custom testing-worker used solely for collecting values of performance metrics by following current policy
 - [ ] Multi-GPU support
-- [ ] Incorporate other distribute RL algorithms
+- [ ] Implement a graphical user interface (GUI) for monitoring training progress and hardware utilization
 
 ## References
 [[1]"IMPALA: Scalable Distributed Deep-RL with Importance Weighted Actor-Learner Architectures," Proceedings of the 35th International Conference on Machine Learning, vol. 80, pp. 1407-1416, 2018](https://arxiv.org/abs/1802.01561)
@@ -114,6 +125,13 @@ training batches pre-emptively in the background with caching.
 |:---:|:---:|
 | <img src="./resources/breakout_s1_3_ratio_5_5_framebased.svg" alt="Architecture"  style="background: white"> | <img src="./resources/seaquest_s1_3_ratio_8_2_framebased.svg" alt="Architecture"  style="background: white"> | 
 | Breakout | Seaquest |
+
+Implemented elite sampling strategies (sampling is executed only on small random subset of replay - based on the size of batch and batch multiplier hyperparameters):
+1. Pick a batch number of samples with the lowest off-policy distance metric.
+2. Sort samples based on the off-policy distance metric. Then divide them into a batch number of subsets. From each subset, pick the trajectory with the lowest off-policy distance metric.
+3. Same as 1 with the addition that we prioritize those samples that have been sampled the least.
+4. Same as 2 with the addition that we prioritize those samples that have been sampled the least.
+
 
 ### Running elite sampling agent
 ```

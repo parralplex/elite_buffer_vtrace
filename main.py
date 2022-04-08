@@ -43,7 +43,7 @@ if __name__ == '__main__':
             random.seed(flags.seed)
 
         try:
-            Learner(flags, run_id).start()
+            Learner(flags, run_id, {}).start()
         except Exception as e:
             logger.exception("Learner execution " + str(run_id) + "  interrupted by exception " + str(e))
             raise e

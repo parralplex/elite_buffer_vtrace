@@ -62,11 +62,8 @@ class Tester(object):
             self.flags = state_dict["flags"]
             self.model = torch.jit.load(url + '/agent_model_scripted_save.pt').to(device).eval()
         except Exception as exp:
-            logger.warning("Error loading model. ")
-            state_dict = torch.load(url + '/regular_model_save_.pt', map_location=device)
-            self.flags = change_args(**state_dict["flags"])
-            self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).to(device).eval()
-            self.model.load_state_dict(state_dict["model_state_dict"])
+            logger.warning("Error encountered while loading model. ")
+            raise exp
 
         try:
             if get_version() != state_dict["project_version"]:

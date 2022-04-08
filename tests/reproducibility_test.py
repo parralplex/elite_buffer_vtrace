@@ -8,6 +8,7 @@ import torch.multiprocessing as mp
 import datetime
 
 from agent.learner_d.learner import Learner
+from multi_train import get_dict
 from option_flags import change_args
 from wrappers.atari_wrappers import make_stock_atari
 import timeout_decorator
@@ -24,7 +25,7 @@ def get_args(multiprocessing_backend, learner_thread_count, env):
 
     seed = 123456
 
-    flags = change_args(op_mode="train", debug=False, save_model_period=1000, lr=0.0004, batch_size=5, r_f_steps=20,
+    additional_args = get_dict(op_mode="train", debug=False, save_model_period=1000, lr=0.0004, batch_size=4, r_f_steps=20,
                         gradient_clip_by_norm_threshold=40, gamma=0.99, c_const=1, rho_const=1,
                         seed=seed, reproducible=True, env=env, actions_count=actions_count,
                         observation_shape=observation_shape,
@@ -44,7 +45,8 @@ def get_args(multiprocessing_backend, learner_thread_count, env):
                         training_fill_in_factor=0.2,
                         policy_gradient_loss_weight=1, value_loss_weight=0.5, entropy_loss_weight=0.01,
                         use_kl_mask=False)
-    return flags
+    flags = change_args(**additional_args)
+    return flags, additional_args
 
 
 class ReproducibilityTest(unittest.TestCase):
@@ -52,13 +54,13 @@ class ReproducibilityTest(unittest.TestCase):
     @timeout_decorator.timeout(LOCAL_TIMEOUT)
     def test_reproducibility_ray_single_thread_learner(self):
         env = "PongNoFrameskip-v4"
-        self.flags = get_args(multiprocessing_backend="ray", learner_thread_count=1, env=env)
+        self.flags, self.additional_args = get_args(multiprocessing_backend="ray", learner_thread_count=1, env=env)
         self.make_2_runs_and_compare()
 
     @timeout_decorator.timeout(LOCAL_TIMEOUT)
     def test_reproducibility_ray_multi_thread_learner(self):
         env = "PongNoFrameskip-v4"
-        self.flags = get_args(multiprocessing_backend="ray", learner_thread_count=3, env=env)
+        self.flags, self.additional_args = get_args(multiprocessing_backend="ray", learner_thread_count=3, env=env)
         self.make_2_runs_and_compare()
 
     @timeout_decorator.timeout(LOCAL_TIMEOUT)
@@ -68,7 +70,7 @@ class ReproducibilityTest(unittest.TestCase):
             mp.set_start_method('spawn')
         except RuntimeError as exp:
             pass
-        self.flags = get_args(multiprocessing_backend="python_native", learner_thread_count=1, env=env)
+        self.flags, self.additional_args = get_args(multiprocessing_backend="python_native", learner_thread_count=1, env=env)
         self.make_2_runs_and_compare()
 
     @timeout_decorator.timeout(LOCAL_TIMEOUT)
@@ -78,7 +80,7 @@ class ReproducibilityTest(unittest.TestCase):
             mp.set_start_method('spawn')
         except RuntimeError as exp:
             pass
-        self.flags = get_args(multiprocessing_backend="python_native", learner_thread_count=3, env=env)
+        self.flags, self.additional_args = get_args(multiprocessing_backend="python_native", learner_thread_count=3, env=env)
         self.make_2_runs_and_compare()
 
     def make_2_runs_and_compare(self):
@@ -100,7 +102,7 @@ class ReproducibilityTest(unittest.TestCase):
             run_id = int(datetime.datetime.timestamp(datetime.datetime.now()))
             save_url = "results/" + env + "_" + str(run_id)
             os.makedirs(save_url)
-            Learner(self.flags, run_id).start()
+            Learner(self.flags, run_id, self.additional_args).start()
             with open(save_url + "/Scores.txt") as file:
                 for line in file:
                     total_rew_run[i].append(float(line.split(',')[0]))

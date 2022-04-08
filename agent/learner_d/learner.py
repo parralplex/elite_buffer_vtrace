@@ -16,27 +16,30 @@ from model.network import ModelNetwork
 from stats.stats import Statistics
 from utils.logger import logger
 from setuptools_scm import get_version
-from option_flags import change_args
+from option_flags import change_args, set_defaults
 
 
 class Learner(object):
-    def __init__(self, flags, run_id):
+    def __init__(self, flags, run_id, additional_args):
         self.run_id = run_id
         self.flags = flags
-        self.file_save_dir_url = "results/" + self.flags.env + "_" + str(self.run_id)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             logger.info("Learner is using CUDA - GPU execution")
         else:
             logger.info("CUDA not available - CPU execution")
-        self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).to(self.device)
 
         if self.flags.op_mode == "train_w_load":
-            self._load_model_state(self.flags.load_model_url, self.device)
+            self._load_model_state(self.flags.load_model_url, self.device, additional_args)
             logger.info("Model state successfully loaded from file save")
         else:
+            self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked,
+                                      self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).to(
+                self.device)
             self._init_optimizer_and_scheduler()
+
+        self.file_save_dir_url = "results/" + self.flags.env + "_" + str(self.run_id)
 
         self.learning_lock = threading.Lock()
         self.mini_batcher_lock = threading.Lock()
@@ -242,20 +245,19 @@ class Learner(object):
         with open(self.file_save_dir_url + '/options_flags.json', 'w') as file:
             json.dump(self.flags.__dict__, file, indent=2)
 
-    def _load_model_state(self, url, device):
+    def _load_model_state(self, url, device, additional_args):
         try:
             state_dict = torch.load(url + '/checkpoint_data_save.pt', map_location=device)
-            self.flags = change_args(**state_dict["flags"])
+            set_defaults(**state_dict["flags"])
+            self.flags = change_args(**additional_args)
             self.model = torch.jit.load(url + '/agent_model_scripted_save.pt').to(device)
         except Exception as exp:
-            logger.warning("Error loading model. " + str(exp))
-            state_dict = torch.load(url + '/regular_model_save_.pt', map_location=device)
-            self.flags = change_args(**state_dict["flags"])
-            self.model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).to(device)
-            self.model.load_state_dict(state_dict["model_state_dict"])
+            logger.warning("Error encountered while loading model. " + str(exp))
+            raise exp
         self._init_optimizer_and_scheduler()
-        self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
-        self.lr_scheduler.load_state_dict(state_dict["scheduler_state_dict"])
+        if self.flags.load_optimizer_save:
+            self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
+            self.lr_scheduler.load_state_dict(state_dict["scheduler_state_dict"])
         try:
             if get_version() != state_dict["project_version"]:
                 logger.warning("Loaded model and project have mismatched versions - project_version:" + get_version() + "  loaded_model_version:" + state_dict["project_version"])

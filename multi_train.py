@@ -16,6 +16,10 @@ if flags.debug:
     os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
+def get_dict(**kwargs):
+    return kwargs
+
+
 if __name__ == '__main__':
     mp.set_start_method('spawn')
 
@@ -27,7 +31,7 @@ if __name__ == '__main__':
         reproducible = False
 
         feature_out_layer_size = 512
-        lr_scheduler_steps = 10000
+        lr_scheduler_steps = 70000
         p = 2
         for j in range(1):
             run_id = int(dt.datetime.timestamp(dt.datetime.now()))
@@ -39,16 +43,15 @@ if __name__ == '__main__':
                 change_logger_file_handler(save_url)
             logger.info("Starting execution " + str(run_id) + " with order number " + str(j))
 
-            lr_scheduler_steps = 12000
             mini_batch_multiplier = 9
 
-            replay_parameters = '[{"type": "queue", "capacity": 1, "sample_ratio": 0.5}, {"type": "custom", "capacity": 1000, "sample_ratio": 0.5, "dist_function":"ln_norm", "sample_strategy":"elite_sampling", "lambda_batch_multiplier":6, "alfa_annealing_factor":2.0}]'
+            replay_parameters = '[{"type": "queue", "capacity": 1, "sample_ratio": 0.5}, {"type": "custom", "capacity": 10000, "sample_ratio": 0.5, "dist_function":"ln_norm", "sample_strategy":"elite_sampling", "lambda_batch_multiplier":6, "alfa_annealing_factor":2.0, "elite_sampling_strategy":"strategy3"}]'
 
-
-            flags = change_args(batch_size=batch_size, r_f_steps=r_f_steps, multiprocessing_backend=backend,
+            additional_args = get_dict(batch_size=batch_size, r_f_steps=r_f_steps, multiprocessing_backend=backend,
                                 reproducible=reproducible,replay_out_cache_size=replay_out_cache_size, p=p,
                                 feature_out_layer_size=feature_out_layer_size, lr_scheduler_steps=lr_scheduler_steps,
                                 mini_batch_multiplier=mini_batch_multiplier, replay_parameters=replay_parameters)
+            flags = change_args(**additional_args)
 
             if flags.reproducible:
                 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -65,7 +68,9 @@ if __name__ == '__main__':
                 random.seed(flags.seed)
 
             try:
-                Learner(flags, run_id).start()
+                Learner(flags, run_id, additional_args).start()
             except Exception as e:
                 logger.exception("Learner execution " + str(run_id) + "  interrupted by exception " + str(e))
                 raise e
+
+

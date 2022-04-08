@@ -1,5 +1,5 @@
 import queue
-
+import pickle
 import torch
 import numpy as np
 import signal
@@ -26,8 +26,11 @@ class CustomReplay(ExperienceReplayTorch):
         self.last_vec_index = 0
         self.device = device
 
-        self.train_model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).to(device)
-        self.train_model.load_state_dict(train_model.state_dict())
+        if self.flags.op_mode =="train_w_load":
+            self.train_model = torch.jit.load(self.flags.load_model_url + '/agent_model_scripted_save.pt').to(device)
+        else:
+            self.train_model = ModelNetwork(self.flags.actions_count, self.flags.frames_stacked, self.flags.feature_out_layer_size, self.flags.use_additional_scaling_FC_layer).to(device)
+            self.train_model.load_state_dict(train_model.state_dict())
         self.local_random = np.random.RandomState(self.flags.seed)
         self.sampling_counter = [1 for i in range(self.replay_capacity)]
 
